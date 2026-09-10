@@ -6,6 +6,7 @@ import { join } from "node:path"
 import { createNodeGitExec, GitMemoryRepo } from "@oh-my-opencode/memory-core"
 
 import { runReflectionChild } from "./spawn-supervisor"
+import type { ReflectionSpawnArgs } from "./spawn-types"
 
 const roots: string[] = []
 afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true }))))
@@ -13,45 +14,43 @@ afterEach(async () => Promise.all(roots.splice(0).map((root) => rm(root, { recur
 function reflectionArgs(runDir: string) {
   const payloadDir = join(runDir, "payload")
   const exec = createNodeGitExec()
-  return {
-    payloadDir,
-    spawnArgs: {
-      runId: "run-supervisor-stderr",
-      kind: "reflection" as const,
-      trigger: "step-count",
-      origin: "manual" as const,
-      attempt: 1,
-      hardDeadlineAt: Date.now() + 10_000,
-      category: "quick",
-      conversationIds: ["conversation-a"],
-      model: "fixture/model",
-      command: process.execPath,
-      args: [],
-      cwd: runDir,
-      env: {},
-      detached: true,
-      paths: {
-        sessionDir: runDir,
-        worktree: runDir,
-        gitCommonDir: runDir,
-        transcript: join(payloadDir, "transcript.jsonl"),
-        persona: join(payloadDir, "persona.md"),
-        prompt: join(payloadDir, "prompt.md"),
-      },
-      mergePolicy: "auto" as const,
-      worktree: {
-        parent: new GitMemoryRepo({ dir: runDir, agentId: "agent-test", exec }),
-        dir: runDir,
-        branch: "reflection/run-supervisor-stderr",
-        baseSha: "base-sha",
-        gitFilePath: join(runDir, ".git"),
-        gitFileSnapshot: "gitdir: original\n",
-        commonConfigPath: join(runDir, "config"),
-        commonConfigSnapshot: null,
-        exec,
-      },
+  const spawnArgs: ReflectionSpawnArgs = {
+    runId: "run-supervisor-stderr",
+    kind: "reflection",
+    trigger: "step-count",
+    origin: "manual",
+    attempt: 1,
+    hardDeadlineAt: Date.now() + 10_000,
+    category: "quick",
+    conversationIds: ["conversation-a"],
+    model: "fixture/model",
+    command: process.execPath,
+    args: [],
+    cwd: runDir,
+    env: {},
+    detached: true,
+    paths: {
+      sessionDir: runDir,
+      worktree: runDir,
+      gitCommonDir: runDir,
+      transcript: join(payloadDir, "transcript.jsonl"),
+      persona: join(payloadDir, "persona.md"),
+      prompt: join(payloadDir, "prompt.md"),
+    },
+    mergePolicy: "auto",
+    worktree: {
+      parent: new GitMemoryRepo({ dir: runDir, agentId: "agent-test", exec }),
+      dir: runDir,
+      branch: "reflection/run-supervisor-stderr",
+      baseSha: "base-sha",
+      gitFilePath: join(runDir, ".git"),
+      gitFileSnapshot: "gitdir: original\n",
+      commonConfigPath: join(runDir, "config"),
+      commonConfigSnapshot: null,
+      exec,
     },
   }
+  return { payloadDir, spawnArgs }
 }
 
 async function runThrowingSupervisor(runDir: string, maxOutputBytes?: number): Promise<unknown> {
