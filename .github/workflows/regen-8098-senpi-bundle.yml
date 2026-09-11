@@ -26,15 +26,15 @@ jobs:
         run: node packages/omo-senpi/plugin/scripts/build-extension.mjs
       - name: Verify Senpi plugin bundle
         run: node packages/omo-senpi/plugin/scripts/build-extension.mjs --check
-      - name: Commit generated bundle
+      - name: Commit generated artifacts
         shell: bash
         run: |
-          if git diff --quiet -- packages/omo-senpi/plugin/extensions/omo.js; then
-            echo "bundle already current"
+          if git diff --quiet -- packages/omo-senpi/plugin/extensions; then
+            echo "generated artifacts already current"
             exit 0
           fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add packages/omo-senpi/plugin/extensions/omo.js
-          git commit -m "build(omo-senpi): regenerate plugin bundle"
+          git add packages/omo-senpi/plugin/extensions
+          git commit -m "build(omo-senpi): regenerate plugin artifacts"
           git push origin HEAD:automation/regen-8098-bundle
