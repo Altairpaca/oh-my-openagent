@@ -1,0 +1,40 @@
+name: regen-8098-senpi-bundle
+
+on:
+  push:
+    branches:
+      - automation/regen-8098-bundle
+
+permissions:
+  contents: write
+
+jobs:
+  regenerate:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 24
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.2
+      - name: Install dependencies
+        run: bun install --frozen-lockfile --ignore-scripts
+      - name: Regenerate Senpi plugin bundle
+        run: node packages/omo-senpi/plugin/scripts/build-extension.mjs
+      - name: Verify Senpi plugin bundle
+        run: node packages/omo-senpi/plugin/scripts/build-extension.mjs --check
+      - name: Commit generated bundle
+        shell: bash
+        run: |
+          if git diff --quiet -- packages/omo-senpi/plugin/extensions/omo.js; then
+            echo "bundle already current"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add packages/omo-senpi/plugin/extensions/omo.js
+          git commit -m "build(omo-senpi): regenerate plugin bundle"
+          git push origin HEAD:automation/regen-8098-bundle
