@@ -1,13 +1,13 @@
-import type { CheckpointTemplate } from "../checkpoint-template.js";
 import type { CheckpointUlwLoopArgs, CheckpointUlwLoopResult } from "../checkpoint.js";
-import { addUlwLoopGoal, createUlwLoopPlan, startNextUlwLoop, summarizeUlwLoopPlan } from "../plan-crud.js";
-import type { UlwLoopToolkitSurface } from "../surface.js";
-import { recordEvidence } from "../evidence.js";
-import { recordFinalReviewBlockers } from "../review-blockers.js";
-import { steerUlwLoop } from "../steering.js";
+import type { CheckpointTemplate } from "../checkpoint-template.js";
+import type { recordEvidence } from "../evidence.js";
+import type { addUlwLoopGoal, createUlwLoopPlan, startNextUlwLoop, summarizeUlwLoopPlan } from "../plan-crud.js";
+import type { recordFinalReviewBlockers } from "../review-blockers.js";
+import type { steerUlwLoop } from "../steering.js";
 import type { UlwLoopSteeringProposal } from "../steering-types.js";
+import type { UlwLoopToolkitSurface } from "../surface.js";
 import type { UlwLoopPlan } from "../types.js";
-import { ULW_LOOP_MANIFEST, type UlwLoopOperation } from "./manifest.js";
+import type { ULW_LOOP_MANIFEST, UlwLoopOperation } from "./manifest.js";
 
 export type ToolkitSurface = UlwLoopToolkitSurface;
 
@@ -87,7 +87,10 @@ type ResultFor<Operation extends UlwLoopOperation> = Operation extends "help"
 						: Operation extends "add-goal"
 							? Awaited<ReturnType<typeof addUlwLoopGoal>>
 							: Operation extends "criteria"
-								? { readonly goalId: string; readonly criteria: UlwLoopPlan["goals"][number]["successCriteria"] }
+								? {
+										readonly goalId: string;
+										readonly criteria: UlwLoopPlan["goals"][number]["successCriteria"];
+									}
 								: Operation extends "record-evidence"
 									? Awaited<ReturnType<typeof recordEvidence>>
 									: Operation extends "record-review-blockers"
@@ -121,9 +124,7 @@ export interface AgentToolkitDependencies {
 }
 
 export interface AgentToolkit {
-	readonly dispatch: (
-		request: ToolkitDispatchRequest | ToolkitUnknownRequest,
-	) => Promise<ToolkitDispatchResponse>;
+	readonly dispatch: (request: ToolkitDispatchRequest | ToolkitUnknownRequest) => Promise<ToolkitDispatchResponse>;
 	readonly help: () => Promise<ToolkitResponseFor<"help">>;
 	readonly createGoals: (args: CreateGoalsArgs) => Promise<ToolkitResponseFor<"create-goals">>;
 	readonly status: () => Promise<ToolkitResponseFor<"status">>;
