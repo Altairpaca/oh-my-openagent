@@ -3,7 +3,6 @@ import { existsSync } from "node:fs"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { findContinuableBoulderWork } from "../ulw-execute-continuation/boulder-eligibility"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
-import { createAgentToolkitTool } from "./agent-toolkit-tool"
 import { createUlwLoopFooterStatus, goalPathsFromContext, type UlwLoopFooterStatusOptions } from "./footer-status"
 import { resolveOmoBin, runOmoCommand } from "./omo-command"
 import { readUlwLoopStatusInProcess, sessionIdFromStatusArgs } from "./status-source"
@@ -49,7 +48,7 @@ type PlanLookup = NonNullable<UlwLoopComponentOptions["planExists"]>
 export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): OmoSenpiComponent {
   return {
     name: "ulw-loop",
-    register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
+    async register(pi: SenpiExtensionAPI, ctx: ComponentContext): Promise<void> {
       const omoBin = (options.resolveOmoBin ?? resolveOmoBin)()
       if (omoBin === null) {
         ctx.logger.info("omo-senpi ulw-loop inactive; omo binary not found")
@@ -80,6 +79,7 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
       // The tool is registered once, but every call must bind to the session the host is serving
       // right now, so the latest event context is what resolves cwd, session id, and goal store.
       let lastEventCtx: unknown
+      const { createAgentToolkitTool } = await import("#omo-agent-toolkit-runtime")
       pi.registerTool({
         ...createAgentToolkitTool({
           resolveCwd: () => cwdFromContext(lastEventCtx),

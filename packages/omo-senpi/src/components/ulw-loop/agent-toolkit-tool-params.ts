@@ -30,12 +30,8 @@ export const AgentToolkitToolParams = Type.Object({
       Type.Literal("record-review-blockers"),
     ],
     {
-      description: [
-        "help returns the operation manifest; status reads this session's plan; create-goals seeds it from a brief.",
-        "complete-goals ACQUIRES the next pending goal (it never completes the run); criteria lists one goal's success criteria.",
-        "record-evidence marks one criterion pass/fail/blocked; checkpoint closes a goal (or prints the quality-gate template).",
-        "steer proposes a plan mutation; add-goal appends a goal; record-review-blockers records final-review blockers.",
-      ].join(" "),
+      description:
+        "help lists the manifest; status reads this session's plan; create-goals seeds it; complete-goals ACQUIRES the next pending goal; criteria lists a goal's criteria; record-evidence marks one criterion; checkpoint closes a goal or prints its quality-gate template; steer proposes a plan mutation; add-goal appends one; record-review-blockers records final-review blockers.",
     },
   ),
   brief: Type.Optional(Type.String({ description: "create-goals only: the plan brief text, inline. One line per goal." })),

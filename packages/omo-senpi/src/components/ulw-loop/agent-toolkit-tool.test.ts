@@ -3,8 +3,9 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync, mkdirSync } from "nod
 import { tmpdir } from "node:os"
 import { join } from "node:path"
 
+import { ULW_LOOP_STEERING_MUTATION_KINDS } from "../../../../omo-codex/plugin/components/ulw-loop/src/types.js"
 import { AGENT_TOOLKIT_OPERATIONS } from "./agent-toolkit-tool-params"
-import { createAgentToolkitTool } from "./agent-toolkit-tool"
+import { createAgentToolkitTool, STEERING_KINDS } from "./agent-toolkit-tool-exec"
 
 const workDirs: string[] = []
 
@@ -44,19 +45,19 @@ function ledgerEntries(cwd: string, sessionId: string): readonly Record<string, 
 }
 
 async function seedCompletableGoal(tool: ReturnType<typeof makeTool>): Promise<string> {
-  const created = await tool.execute({ operation: "create-goals", brief: "- alpha goal\n- beta goal" })
+  const created = (await tool.execute("call-create", { operation: "create-goals", brief: "- alpha goal\n- beta goal" })).details
   expect(created.ok).toBe(true)
-  const started = await tool.execute({ operation: "complete-goals" })
+  const started = (await tool.execute("call-start", { operation: "complete-goals" })).details
   expect(started.ok).toBe(true)
   const goalId = "G001-alpha-goal"
   for (const criterionId of ["C001", "C002", "C003"]) {
-    const recorded = await tool.execute({
+    const recorded = (await tool.execute("call-evidence", {
       operation: "record-evidence",
       goalId,
       criterionId,
       status: "pass",
       evidence: "tool fixture proof",
-    })
+    })).details
     expect(recorded.ok).toBe(true)
   }
   return goalId
@@ -67,6 +68,10 @@ describe("omo_agent_toolkit tool", () => {
     const tool = makeTool(makeWorkdir(), [])
 
     expect(tool.name).toBe("omo_agent_toolkit")
+    expect(tool.label.length).toBeGreaterThan(0)
+    const operationSchema = tool.parameters.properties.operation
+    const schemaOperations = operationSchema.anyOf.map((member) => member.const)
+    expect(schemaOperations).toEqual([...AGENT_TOOLKIT_OPERATIONS])
     expect([...AGENT_TOOLKIT_OPERATIONS]).toEqual([
       "help",
       "create-goals",
@@ -81,10 +86,14 @@ describe("omo_agent_toolkit tool", () => {
     ])
   })
 
+  it("#given the mirrored steering vocabulary #when compared with the toolkit constant #then they agree exactly", () => {
+    expect([...STEERING_KINDS].sort()).toEqual([...ULW_LOOP_STEERING_MUTATION_KINDS].sort())
+  })
+
   it("#given a host without a session id #when any operation runs #then it fails closed", async () => {
     const tool = makeTool(makeWorkdir(), [], null)
 
-    const result = await tool.execute({ operation: "status" })
+    const result = (await tool.execute("call-1", { operation: "status" })).details
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe("ULW_LOOP_SESSION_ID_REQUIRED")
@@ -96,12 +105,12 @@ describe("omo_agent_toolkit tool", () => {
     const tool = makeTool(cwd, [goalPath])
     const goalId = await seedCompletableGoal(tool)
 
-    const closed = await tool.execute({
+    const closed = (await tool.execute("call-checkpoint", {
       operation: "checkpoint",
       goalId,
       status: "complete",
       evidence: "tool checkpoint",
-    })
+    })).details
 
     expect(closed.ok).toBe(true)
     const codexGoals = ledgerEntries(cwd, "tool-session").map((entry) => entry["codexGoal"])
@@ -114,13 +123,13 @@ describe("omo_agent_toolkit tool", () => {
     const tool = makeTool(cwd, [goalPath])
     const goalId = await seedCompletableGoal(tool)
 
-    const closed = await tool.execute({
+    const closed = (await tool.execute("call-checkpoint", {
       operation: "checkpoint",
       goalId,
       status: "complete",
       evidence: "tool checkpoint",
       codexGoal: { objective: "Explicit objective", status: "active" },
-    })
+    })).details
 
     expect(closed.ok).toBe(true)
     const codexGoals = ledgerEntries(cwd, "tool-session").map((entry) => entry["codexGoal"])
@@ -132,12 +141,12 @@ describe("omo_agent_toolkit tool", () => {
     const tool = makeTool(cwd, [])
     const goalId = await seedCompletableGoal(tool)
 
-    const closed = await tool.execute({
+    const closed = (await tool.execute("call-checkpoint", {
       operation: "checkpoint",
       goalId,
       status: "complete",
       evidence: "tool checkpoint",
-    })
+    })).details
 
     expect(closed.ok).toBe(true)
     if (closed.ok) expect(closed.nextActions.join(" ")).toContain("create_goal")
@@ -149,7 +158,7 @@ describe("omo_agent_toolkit tool", () => {
     const goalId = await seedCompletableGoal(tool)
     const before = ledgerEntries(cwd, "tool-session").length
 
-    const result = await tool.execute({ operation: "record-evidence", goalId, criterionId: "C001", status: "nope", evidence: "x" })
+    const result = (await tool.execute("call-bad", { operation: "record-evidence", goalId, criterionId: "C001", status: "nope", evidence: "x" })).details
 
     expect(result.ok).toBe(false)
     if (!result.ok) expect(result.error.code).toBe("ULW_LOOP_ARGUMENT_MISSING")
