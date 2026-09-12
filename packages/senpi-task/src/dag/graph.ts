@@ -1,4 +1,3 @@
-import { canonicalAgentName } from "../agents/legacy-agent-names"
 import {
   DAG_SETTINGS_DEFAULTS,
   type DagBottleneck,
@@ -84,13 +83,11 @@ function compareSequences(a: readonly DagNodeId[], b: readonly DagNodeId[]): num
 }
 
 function routeOf(input: DagNodeInput): DagRoute {
-  // Only the canonical agent is stored: DagRoute is hashed by dag/fingerprint.ts, so a legacy
-  // subagent_type must never leak into the persisted route.
   return input.category !== undefined
     ? { kind: "category", category: input.category }
     : {
         kind: "agent",
-        agent: canonicalAgentName(input.subagent_type).name,
+        agent: input.subagent_type.trim(),
         ...(input.model === undefined ? {} : { model: input.model }),
       }
 }

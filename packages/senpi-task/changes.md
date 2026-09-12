@@ -1,4 +1,8 @@
 
+## 2026-09-12 — Remove the retired curated agent-name alias
+
+`agents/legacy-agent-names.ts` and its exports (`LEGACY_AGENT_NAME_ALIASES`, `canonicalAgentName`, `legacyAgentNameNotice`, `CanonicalAgentName`) are deleted: the one-release window opened at 5.0.0-beta.51 and the package has since shipped through 5.0.0-beta.56. Every input boundary takes the submitted agent name verbatim — `resolveAgent`, `interactionPolicyForAgent`, `mapOmoConfigAgents` (including `allowed_subagents`), `dag/graph.ts` route compilation, `team/member-validator.ts`, the task tool's `validateTaskTarget` / `resolveSpawnItems`, and the spawn policy / invocation gate. The in-memory `legacySubagentType` → `legacyAlias` → `legacy_subagent_type` plumbing (validation, execute, execute-single, result-details, start-presentation) is removed with it, so a start text carries no deprecation line and `TaskToolDetails` never gains the extra field. `legacyOmoConfigAgentKeys` is gone; its only consumer was the omo-senpi startup notice. `resolve-agent.ts`'s `legacyFallbackChain` read-alias is deleted as dead code — `AGENT_FALLBACK_CHAINS` has been keyed by the canonical ids since the rename.
+
 ## 2026-09-10 — Retire myth agent names from test fixtures and update package documentation
 
 The builtin curated agents `metis` and `momus` are renamed to `plan-consultant` and `plan-reviewer` in

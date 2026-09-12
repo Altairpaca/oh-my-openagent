@@ -18,9 +18,6 @@ type RunSpawnInput = ForegroundWaitOptions & {
   readonly signal: AbortSignal | undefined
   readonly onUpdate: AgentToolUpdateCallback<TaskToolDetails> | undefined
   readonly ctx: TaskToolContext
-  // Set by the caller when the spawn resolved through a retired curated agent id; validateTaskTarget
-  // re-derives it when the params still carry the raw legacy id.
-  readonly legacySubagentType?: string
 }
 
 function result(text: string, details: TaskToolDetails): AgentToolResult<TaskToolDetails> {
@@ -69,17 +66,9 @@ export async function runSpawn(
   }
   const effectiveParams = policy?.kind === "force" ? { ...params, prompt: policy.prompt, load_skills: [] } : params
   const target = selection.kind === "category" ? { category: selection.category } : { subagentType: selection.subagentType }
-  // Retired curated ids canonicalize before the spawn; the legacy id rides along in-memory only so
-  // the start text and details can surface the deprecation notice.
-  const legacySubagentType =
-    (selection.kind === "subagent_type" ? selection.legacySubagentType : undefined) ?? input.legacySubagentType
   const startLabels: StartLabels = {
     taskSummary: params.task_summary,
     description: params.description,
-    ...(legacySubagentType !== undefined &&
-      selection.kind === "subagent_type" && {
-        legacyAlias: { legacy: legacySubagentType, canonical: selection.subagentType },
-      }),
   }
   // The default skill discovery inside buildStartSpec reads the senpi barrel synchronously, so the
   // barrel is warmed here (memoized: a cache hit once the engine barrel is loaded).
@@ -127,7 +116,7 @@ export async function runSpawn(
   if (params.run_in_background === true) {
     return result(
       appendMissingSkills(backgroundStartText(started, startLabels), spec.skills),
-      startedDetails(started, params, spec.execution_mode, spec.skills, legacySubagentType),
+      startedDetails(started, params, spec.execution_mode, spec.skills),
     )
   }
 
@@ -154,7 +143,7 @@ export async function runSpawn(
     emittedAt = Date.now()
     onUpdate({
       content: [{ type: "text", text: progress.contentText() }],
-      details: partialDetails(started, params, spec.execution_mode, progress.details(), spec.skills, legacySubagentType),
+      details: partialDetails(started, params, spec.execution_mode, progress.details(), spec.skills),
     })
   }
   const schedule = (): void => {
@@ -185,7 +174,7 @@ export async function runSpawn(
         progress: { activity: "queued · waiting for slot", startedAt },
         childId: started.task_id,
         turns: 0,
-      }, spec.skills, legacySubagentType),
+      }, spec.skills),
     })
   } else {
     emit()
@@ -204,7 +193,7 @@ export async function runSpawn(
         backgroundConversionText(started, startLabels, waited.budgetSeconds),
         spec.skills,
       ), {
-        ...startedDetails(started, params, spec.execution_mode, spec.skills, legacySubagentType),
+        ...startedDetails(started, params, spec.execution_mode, spec.skills),
         run_in_background: true,
       })
     }
@@ -219,7 +208,7 @@ export async function runSpawn(
     const reason = "parent turn aborted"
     await deps.manager.cancelTask(started.task_id, reason)
     return result(`Task ${started.task_id} cancelled: ${reason}.${continuationFooter(started.task_id)}`, {
-      ...startedDetails(started, params, spec.execution_mode, spec.skills, legacySubagentType),
+      ...startedDetails(started, params, spec.execution_mode, spec.skills),
       status: "cancelled",
       reason,
     })

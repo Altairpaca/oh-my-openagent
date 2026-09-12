@@ -304,8 +304,8 @@ describe("resolveAgent", () => {
   })
 })
 
-describe("resolveAgent legacy name aliases", () => {
-  test("#given a legacy curated id #when resolved #then it resolves as the canonical id", () => {
+describe("resolveAgent retired curated ids", () => {
+  test("#given a retired curated id #when resolved #then it is not_found and never lands on the canonical agent", () => {
     // given
     const agents = roster(
       { name: "plan-reviewer", prompt: "Advise only" },
@@ -317,14 +317,16 @@ describe("resolveAgent legacy name aliases", () => {
     const metis = resolveAgent("metis", agents, undefined, { modelOverride: "openai/explicit" })
 
     // then
-    expect(momus.kind).toBe("resolved")
-    if (momus.kind !== "resolved") throw new Error("expected resolved")
-    expect(momus.agent).toBe("plan-reviewer")
-    expect(momus.instructions).toBe("Advise only")
-    expect(metis.kind).toBe("resolved")
-    if (metis.kind !== "resolved") throw new Error("expected resolved")
-    expect(metis.agent).toBe("plan-consultant")
-    expect(metis.instructions).toBe("Consult only")
+    expect(momus).toEqual({
+      kind: "not_found",
+      agent: "momus",
+      availableAgents: ["plan-consultant", "plan-reviewer"],
+    })
+    expect(metis).toEqual({
+      kind: "not_found",
+      agent: "metis",
+      availableAgents: ["plan-consultant", "plan-reviewer"],
+    })
   })
 
   test("#given the canonical id #when resolved #then the result names the canonical id", () => {

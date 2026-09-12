@@ -182,7 +182,7 @@ describe("task engine builtin agent overlay", () => {
     expect(advertisedPlanGatedAgentNames(engine)).toBe("plan-consultant")
   })
 
-  test("#given the legacy agents.momus key in omo.json #when the engine resolves agents #then the alias lands on plan-reviewer and no momus agent exists", () => {
+  test("#given the retired agents.momus key in omo.json #when the engine resolves agents #then it defines a momus agent and leaves plan-reviewer builtin", () => {
     // given
     const cwd = tempProject()
     writeOmoJson(cwd, { agents: { momus: { model: "omo-mock/mock-1", disable: true } } })
@@ -191,9 +191,10 @@ describe("task engine builtin agent overlay", () => {
     const engine = composeIn(cwd)
 
     // then
-    expect(engine.agents["plan-reviewer"]?.model).toBe("omo-mock/mock-1")
-    expect(engine.agents["plan-reviewer"]?.disable).toBe(true)
-    expect(engine.agents["momus"]).toBeUndefined()
-    expect(advertisedPlanGatedAgentNames(engine)).toBe("plan-consultant")
+    expect(engine.agents["momus"]?.model).toBe("omo-mock/mock-1")
+    expect(engine.agents["momus"]?.disable).toBe(true)
+    expect(engine.agents["plan-reviewer"]?.model).toBeUndefined()
+    expect(engine.agents["plan-reviewer"]?.disable).toBeUndefined()
+    expect(advertisedPlanGatedAgentNames(engine)).toBe("plan-consultant, plan-reviewer")
   })
 })

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Breaking
+
+**The retired `metis` / `momus` agent ids are gone.** Their one-release read alias shipped in 5.0.0-beta.51 and is now removed: `omo.json` `agents.metis` / `agents.momus` no longer resolve to `plan-consultant` / `plan-reviewer` (such a key now defines an ordinary custom agent under that name and emits no startup notice), `subagent_type: "metis"|"momus"`, `allowed_subagents` entries, team members, and workflow node routes are all taken verbatim, and the deprecation notices that named them are gone. Rename them to `plan-consultant` / `plan-reviewer`.
+
 ## [5.0.0-beta.56] - 2026-09-12
 
 Devin chats again, and the resident Kibitzer is now the only recall path.
