@@ -56,7 +56,7 @@ const PUBLISH_LAZYCODEX = "inputs.publish_lazycodex == true"
 const NOT_LAZYCODEX_ONLY = "inputs.lazycodex_only != true"
 
 describe("LazyCodex publish channels", () => {
-  test("prereleases sync the marketplace and cut a LazyCodex prerelease that never takes the Latest badge", () => {
+  test("every channel that publishes lazycodex-ai also syncs the marketplace and cuts the LazyCodex release", () => {
     // #given
     const releaseStep = step("release", "Create LazyCodex GitHub release")
     const releaseRun = run("release", "Create LazyCodex GitHub release")
@@ -68,17 +68,14 @@ describe("LazyCodex publish channels", () => {
       step("release", "Sync LazyCodex Codex marketplace").if,
       step("release", "Resolve LazyCodex release payload").if,
     ]
-    const prereleaseBranch = shellBranch(releaseRun, 'if [ -n "$DIST_TAG" ]; then')
+    const onlyBranch = shellBranch(releaseRun, 'if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then')
 
     // #then
     for (const gate of marketplaceGates) expect(gate).toBe(PUBLISH_LAZYCODEX)
     expect(releaseStep.if).toBe(`${PUBLISH_LAZYCODEX} && steps.lazycodex-release-state.outputs.lazycodex_changed == 'true'`)
-    expect(releaseStep.env?.DIST_TAG).toBe("${{ needs.release-metadata.outputs.dist_tag }}")
-    expect(prereleaseBranch).toContain("CHANNEL_FLAGS=(--prerelease --latest=false)")
-    expect(prereleaseBranch).toContain("bun script/release-latest-flag.ts")
-    expect(prereleaseBranch.indexOf("--prerelease")).toBeLessThan(prereleaseBranch.indexOf("else"))
-    expect(releaseRun).toContain('gh release create "v${VERSION}" "${CHANNEL_FLAGS[@]}"')
-    expect(releaseRun).not.toContain('"$LATEST_FLAG"')
+    expect(releaseStep.env?.RELEASE_SHA).toBe("${{ needs.prepare-release-state.outputs.release_sha }}")
+    expect(onlyBranch).toContain("${RELEASE_SHA}")
+    expect(releaseRun).not.toContain("dist_tag")
   })
 
   test("lazycodex_only is a dispatch input that reaches the provenance-safe child under its own tag namespace", () => {
@@ -88,7 +85,7 @@ describe("LazyCodex publish channels", () => {
     const metadataRun = run("release-metadata", "Calculate version")
 
     // #when
-    const onlyBranch = shellBranch(dispatchRun, 'if [ "$LAZYCODEX_ONLY" = "true" ]; then')
+    const onlyBranch = shellBranch(dispatchRun, 'if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then')
     const metadataGuard = shellBranch(metadataRun, 'if [ "$LAZYCODEX_ONLY" = "true" ]; then')
 
     // #then
@@ -108,7 +105,7 @@ describe("LazyCodex publish channels", () => {
     const prepareRun = run("prepare-release-state", "Prepare release state (generation)")
 
     // #when
-    const onlyBranch = shellBranch(prepareRun, 'if [ "$LAZYCODEX_ONLY" = "true" ]; then')
+    const onlyBranch = shellBranch(prepareRun, 'if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then')
     const afterOnlyBranch = prepareRun.slice(prepareRun.indexOf(onlyBranch) + onlyBranch.length)
     const omoRefusal = afterOnlyBranch.indexOf('refs/tags/lazycodex-v${VERSION}')
 

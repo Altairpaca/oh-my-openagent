@@ -449,7 +449,7 @@ jobs:
 
           BASE_HEAD="$(git rev-parse "origin/${BASE_REF}")"
 
-          if [ "$LAZYCODEX_ONLY" = "true" ]; then
+          if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then
             # A LazyCodex-only release publishes the base head as-is: no omo manifest is stamped and no
             # release commit lands on the base branch. The provenance-safe child is dispatched from the
             # lazycodex-v<version> tag namespace so it never collides with an omo release tag, and a
@@ -714,7 +714,7 @@ jobs:
           # LazyCodex-only releases tag the source under their own namespace so the omo release
           # path can still refuse the number (and vice versa) instead of reusing a foreign tag.
           RELEASE_TAG="v${VERSION}"
-          if [ "$LAZYCODEX_ONLY" = "true" ]; then
+          if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then
             RELEASE_TAG="lazycodex-v${VERSION}"
           fi
 
@@ -1267,7 +1267,6 @@ jobs:
         if: inputs.publish_lazycodex == true && steps.lazycodex-release-state.outputs.lazycodex_changed == 'true'
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
-          DIST_TAG: ${{ needs.release-metadata.outputs.dist_tag }}
           RELEASE_SHA: ${{ needs.prepare-release-state.outputs.release_sha }}
           LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
           PREVIOUS_LAZYCODEX_VERSION: ${{ steps.lazycodex-release-state.outputs.previous_lazycodex_version }}
@@ -1278,7 +1277,7 @@ jobs:
           # must fail the step instead of silently mis-assigning the badge.
           set -euo pipefail
 
-          if [ "$LAZYCODEX_ONLY" = "true" ]; then
+          if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then
             SOURCE_DESC="oh-my-openagent ${RELEASE_SHA} (LazyCodex-only release)"
           else
             SOURCE_DESC="oh-my-openagent v${VERSION} (${RELEASE_SHA})"
@@ -1289,15 +1288,11 @@ jobs:
             printf '%s\n' "Compared against: lazycodex-ai@${PREVIOUS_LAZYCODEX_VERSION}"
           } > /tmp/lazycodex-release-notes.md
 
-          # A prerelease never takes the mirror's Latest badge: `codex plugin marketplace add`
-          # users browse that release, and it must stay on the stable line.
-          if [ -n "$DIST_TAG" ]; then
-            CHANNEL_FLAGS=(--prerelease --latest=false)
-          else
-            CHANNEL_FLAGS=("$(gh release list --repo code-yeongyu/lazycodex --exclude-drafts --limit 1000 --json tagName --jq '.[].tagName' | bun script/release-latest-flag.ts "$VERSION")")
-          fi
+          # Same badge rule as the omo release above (#7743): never `--prerelease`, Latest decided by
+          # the highest published semver, so a later stable outranks every beta on the mirror too.
+          LATEST_FLAG="$(gh release list --repo code-yeongyu/lazycodex --exclude-drafts --limit 1000 --json tagName --jq '.[].tagName' | bun script/release-latest-flag.ts "$VERSION")"
           gh release view "v${VERSION}" --repo code-yeongyu/lazycodex >/dev/null 2>&1 || \
-            gh release create "v${VERSION}" "${CHANNEL_FLAGS[@]}" --repo code-yeongyu/lazycodex --target main --title "v${VERSION}" --notes-file /tmp/lazycodex-release-notes.md
+            gh release create "v${VERSION}" "$LATEST_FLAG" --repo code-yeongyu/lazycodex --target main --title "v${VERSION}" --notes-file /tmp/lazycodex-release-notes.md
 
       - name: Create GitHub release
         # Always a full release, never `--prerelease`, on every channel: the npm

@@ -180,7 +180,9 @@ describe("test workflows", () => {
     const verifyChecksEveryHash = verifyStep.includes("shasum -a 256 -c SHA256SUMS")
     const verifyFailsBelowThirteenAssets = verifyStep.includes('"$ASSET_COUNT" -ne 13')
     const stepsAreChannelNeutral = ![downloadStep, uploadStep, verifyStep].some((step) => step.includes("dist_tag"))
-    const verifyRunsUnconditionally = !verifyStep.includes("if:") && !verifyStep.includes("skip_platform")
+    const verifyRunsUnconditionally = !verifyStep.includes("skip_platform") &&
+      (verifyStep.match(/\n\s+if: /g) ?? []).length <= 1 &&
+      (!verifyStep.includes("if:") || verifyStep.includes("if: inputs.lazycodex_only != true"))
 
     // #then
     expect(stepsFollowReleaseCreation, "release-binary steps must live inside the release job after Create GitHub release").toBe(true)

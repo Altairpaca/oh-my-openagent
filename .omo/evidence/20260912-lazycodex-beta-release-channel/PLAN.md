@@ -7,8 +7,9 @@ Scope: `.github/workflows/publish.yml` and its shape tests only. No plugin or in
 1. Beta channel propagates LazyCodex
    - `Require LazyCodex sync token`, `Checkout LazyCodex marketplace`, `Sync LazyCodex Codex marketplace`,
      `Resolve LazyCodex release payload`: `if: inputs.publish_lazycodex == true` (was `dist_tag == ''`).
-   - `Create LazyCodex GitHub release`: same gate + `lazycodex_changed`; prerelease -> `--prerelease --latest=false`,
-     stable -> `release-latest-flag.ts` as before. Notes carry the source SHA.
+   - `Create LazyCodex GitHub release`: same gate + `lazycodex_changed`; the badge rule stays the repo-wide one from
+     #7743 (`release-latest-flag.ts`, never `--prerelease`) so a later stable outranks every beta. Notes carry the
+     source SHA.
 2. `lazycodex_only` input
    - `release-metadata`: requires explicit `version` and `publish_lazycodex=true`.
    - `preflight-trust`: trusted-publisher probe covers `lazycodex-ai` only.
