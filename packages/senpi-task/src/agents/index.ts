@@ -21,13 +21,7 @@ export {
 } from "./invocation-guard"
 export type { AgentInvocationCondition, InvocationGuardVerdict, PlanArtifactReference, SkillInvocationState } from "./invocation-guard"
 export { loadAgents } from "./loader"
-export {
-  LEGACY_AGENT_NAME_ALIASES,
-  canonicalAgentName,
-  legacyAgentNameNotice,
-} from "./legacy-agent-names"
-export type { CanonicalAgentName } from "./legacy-agent-names"
-export { mapOmoConfigAgents, legacyOmoConfigAgentKeys } from "./omo-config-agents"
+export { mapOmoConfigAgents } from "./omo-config-agents"
 export { resolveAgent } from "./resolve-agent"
 export { defineAgent } from "./schema"
 export { registerAgent } from "./registry"

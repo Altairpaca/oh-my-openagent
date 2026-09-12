@@ -13,8 +13,6 @@ import {
   type ConfigMigrationDiscoveryFileSystem,
   type ConfigMigrationPathOperations,
 } from "@oh-my-opencode/omo-opencode/config-migration"
-import { legacyOmoConfigAgentKeys } from "@oh-my-opencode/senpi-task"
-
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
 import { loadSenpiOmoConfig, type SenpiOmoConfigResult } from "../config-resolution"
 
@@ -130,7 +128,6 @@ export function createConfigStartupComponent(options: ConfigStartupComponentOpti
 }
 
 export type StartupNotice = {
-  readonly kind?: "omo-config:agent-alias-deprecated"
   readonly message: string
   readonly type: "info" | "warning"
 }
@@ -153,13 +150,6 @@ export function notificationMessages(
   })
   if (config.diagnostics.length > 0) messages.push({
     message: `omo-senpi: configuration diagnostics: ${config.diagnostics.map((diagnostic) => diagnostic.message).join("; ")}`,
-    type: "warning",
-  })
-  // One warning per retired omo.json agents key; the alias in senpi-task's
-  // mapOmoConfigAgents already lands the definition on the canonical id, so this is notice only.
-  for (const { legacy, canonical } of legacyOmoConfigAgentKeys(config.config)) messages.push({
-    kind: "omo-config:agent-alias-deprecated",
-    message: `omo-senpi: omo.json agents.${legacy} is deprecated; rename the key to agents.${canonical}. The alias is removed in the next release.`,
     type: "warning",
   })
   return messages

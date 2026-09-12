@@ -10,7 +10,7 @@ describe("toContinueResult", () => {
     const outcome = {
       kind: "one_shot_agent",
       task_id: "st_00000001",
-      agent: "momus",
+      agent: "plan-reviewer",
       message: AGENT_INTERACTION_POLICIES["plan-reviewer"].sendDenialReminder,
     } as const
 

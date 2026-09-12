@@ -140,7 +140,7 @@ The block may also appear at the shared top level or in profile layers and follo
 
 ### `memory` (Senpi harness)
 
-The optional `memory` block configures the Senpi memory subsystem (`schema/memory.ts` `OmoMemorySettingsSchema`). Keys: `enabled` (default `true`), `agent` (default `"auto"`), the sub-blocks `reflection`, `nudge`, `recall` (the Kibitzer judge behind `Aha moment!` notices: `enabled`, `max_items`), `facts`, `dream`, `people`, `soul`, `write_notice`, `sync`, `search`, plus `compile_warn_tokens` and per-agent overrides under `agents`.
+The optional `memory` block configures the Senpi memory subsystem (`schema/memory.ts` `OmoMemorySettingsSchema`). Keys: `enabled` (default `true`), `agent` (default `"auto"`), the sub-blocks `reflection`, `nudge`, `recall` (the resident, read-only Kibitzer sidecar behind `recalled memory:` notices - one per main session, prompt and tool-call triggered, nudge-only output, no memory writes: `enabled` as the only off switch, `max_items` per wake, `category` defaulting to `quick`, `event_caps` defaulting to `{ tool_args: 400, result_head: 600, assistant: 1500, prompt: 4000 }` for its redacted event feed, `sidecar_max_tokens` defaulting to `48000` with a proactive reseed at 60%, `max_concurrent_wakes` defaulting to `2` as the machine-wide wake lease, and `tool_budget` defaulting to `8` read-only tool calls per wake), `facts`, `dream`, `people`, `soul`, `write_notice`, `sync`, `search`, plus `compile_warn_tokens` and per-agent overrides under `agents`. These recall keys can be set at the shared root, harness/profile layer, or per-agent override; layer values are deep-partial and later layers win.
 
 ### `git_master` (Senpi harness)
 
@@ -262,7 +262,7 @@ These are the only deprecated keys the strict agent schema accepts. `textVerbosi
 
 The Senpi task engine ships four builtin curated agents: `explore` and `librarian` are always spawnable through the task tool with zero configuration, for example `task(subagent_type: "explore", ...)`, while `plan-consultant` and `plan-reviewer` are plan-gated: spawnable only after the user requests the `ulw-plan` workflow, a `.omo/plans/*.md` artifact was touched, and `ulw-execute` was never invoked. They are read-only research and review specialists; implementation and orchestration agents stay category-routed (architecture consults go through `task(category: "architect")`).
 
-> **Deprecated**: `agents.metis` and `agents.momus` (and `subagent_type: "metis"|"momus"`) still resolve to `plan-consultant` and `plan-reviewer` with a deprecation notice and are removed in the release after 5.0.0-beta.51. <!-- retired-name-allowed -->
+> **Removed**: `agents.metis` / `agents.momus` and `subagent_type: "metis"|"momus"` no longer resolve to `plan-consultant` / `plan-reviewer`. The one-release alias window closed after 5.0.0-beta.51: a retired id is now an ordinary agent name, so a config key defines a custom agent and an undefined `subagent_type` fails as unknown. Rename them to the canonical ids. <!-- retired-name-allowed -->
 
 | Name | Purpose |
 |------|---------|
