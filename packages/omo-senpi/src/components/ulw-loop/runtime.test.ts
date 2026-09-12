@@ -137,36 +137,35 @@ describe("omo-senpi ulw-loop resolveOmoBin toolkit-first chain", () => {
 })
 
 describe("omo-senpi ulw-loop default registration through the toolkit chain", () => {
-  it("#given a PATH omo-agent-toolkit and a real session plan #when the component registers with defaults #then status is read in-process and the toolkit binary is never executed", async () => {
-    const fake = createTempOmoBin(activeStatus("DEFAULT-REGISTRATION"), "omo-agent-toolkit")
-    const path = process.env.PATH ? `${fake.dir}${delimiter}${process.env.PATH}` : fake.dir
+  it("#given a real session plan and an unusable toolkit path #when input arrives #then status is read in-process and nothing is spawned", async () => {
+    const fixture = createTempOmoBin(activeStatus("DEFAULT-REGISTRATION"), "omo-agent-toolkit")
     try {
-      await withEnvAsync({ OMO_AGENT_TOOLKIT_BIN: undefined, OMO_BIN: undefined, PATH: path }, async () => {
-        const seeded = await createAgentToolkit({
-          cwd: fake.dir,
-          sessionId: TEST_SESSION_ID,
-          surface: "omo-senpi",
-        }).createGoals({ brief: "- alpha goal", force: true })
-        expect(seeded.ok).toBe(true)
+      const seeded = await createAgentToolkit({
+        cwd: fixture.dir,
+        sessionId: TEST_SESSION_ID,
+        surface: "omo-senpi",
+      }).createGoals({ brief: "- alpha goal", force: true })
+      expect(seeded.ok).toBe(true)
 
-        const pi = new FakeExtensionAPI()
-        await createUlwLoopComponent().register(pi, {
-          logger: createLogger(),
-          config: { getFlag: () => false },
-        })
-
-        const results = await pi.dispatch(
-          "input",
-          { type: "input", text: "continue", source: "interactive", streamingBehavior: "steer" },
-          sessionEventCtx(fake.dir),
-        )
-
-        expect(results).toHaveLength(1)
-        expect(results[0]).toMatchObject({ action: "transform" })
-        expect(existsSync(join(fake.dir, "argv.json"))).toBe(false)
+      const pi = new FakeExtensionAPI()
+      // A bin path that cannot be executed: if the component still spawned the toolkit for its
+      // status probe, the probe would fail and the hook would fall back to "continue".
+      await createUlwLoopComponent({ resolveOmoBin: () => join(fixture.dir, "does-not-exist-omo-agent-toolkit") }).register(pi, {
+        logger: createLogger(),
+        config: { getFlag: () => false },
       })
+
+      const results = await pi.dispatch(
+        "input",
+        { type: "input", text: "continue", source: "interactive", streamingBehavior: "steer" },
+        sessionEventCtx(fixture.dir),
+      )
+
+      expect(results).toHaveLength(1)
+      expect(results[0]).toMatchObject({ action: "transform" })
+      expect(existsSync(join(fixture.dir, "argv.json"))).toBe(false)
     } finally {
-      fake.cleanup()
+      fixture.cleanup()
     }
   }, { timeout: 20000 })
 
