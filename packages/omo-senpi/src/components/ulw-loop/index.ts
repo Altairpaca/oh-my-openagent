@@ -3,8 +3,9 @@ import { existsSync } from "node:fs"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { findContinuableBoulderWork } from "../ulw-execute-continuation/boulder-eligibility"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
-import { createUlwLoopFooterStatus, type UlwLoopFooterStatusOptions } from "./footer-status"
+import { createUlwLoopFooterStatus, goalPathsFromContext, type UlwLoopFooterStatusOptions } from "./footer-status"
 import { resolveOmoBin, runOmoCommand } from "./omo-command"
+import { readUlwLoopStatusInProcess, sessionIdFromStatusArgs } from "./status-source"
 import { extractSessionId, resolveUlwLoopSessionScope, ulwLoopScopedGoalsPath, ulwLoopStatusArgs } from "./session-scope"
 
 const CONTINUATION_LIMIT = 8
@@ -47,7 +48,7 @@ type PlanLookup = NonNullable<UlwLoopComponentOptions["planExists"]>
 export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): OmoSenpiComponent {
   return {
     name: "ulw-loop",
-    register(pi: SenpiExtensionAPI, ctx: ComponentContext): void {
+    async register(pi: SenpiExtensionAPI, ctx: ComponentContext): Promise<void> {
       const omoBin = (options.resolveOmoBin ?? resolveOmoBin)()
       if (omoBin === null) {
         ctx.logger.info("omo-senpi ulw-loop inactive; omo binary not found")
@@ -56,7 +57,15 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
         return
       }
 
-      const runCommand = options.runCommand ?? runOmoCommand
+      // Native never spawns the toolkit for its own control plane any more: the default reader is the
+      // in-process SDK, and options.runCommand stays as the injected seam for tests.
+      const runCommand: RunCommand =
+        options.runCommand ??
+        (async (_bin, args, commandOptions) => {
+          const sessionId = sessionIdFromStatusArgs(args)
+          if (sessionId === undefined) return { code: 1, stdout: JSON.stringify({ ok: false, error: { code: "ULW_LOOP_SESSION_ID_REQUIRED" } }) }
+          return readUlwLoopStatusInProcess(commandOptions.cwd, sessionId)
+        })
       const planExists = options.planExists ?? ulwLoopPlanExists
       const footerStatus = createUlwLoopFooterStatus(options.footerStatus)
       const state = {
@@ -67,12 +76,26 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
         pendingRun: undefined as { payload: unknown; status: ActiveStatus } | undefined,
       }
 
+      // The tool is registered once, but every call must bind to the session the host is serving
+      // right now, so the latest event context is what resolves cwd, session id, and goal store.
+      let lastEventCtx: unknown
+      const { createAgentToolkitTool } = await import("#omo-agent-toolkit-runtime")
+      pi.registerTool({
+        ...createAgentToolkitTool({
+          resolveCwd: () => cwdFromContext(lastEventCtx),
+          resolveSessionId: () => resolveUlwLoopSessionScope(lastEventCtx) ?? undefined,
+          resolveGoalPaths: () => goalPathsFromContext(lastEventCtx),
+        }),
+      })
+
       pi.on("session_start", async (_payload, eventCtx) => {
+        lastEventCtx = eventCtx
         const status = await readActiveStatus(omoBin, runCommand, planExists, eventCtx, ctx)
         footerStatus.sync(eventCtx, status?.active ?? false)
       })
 
       pi.on("input", async (payload, eventCtx) => {
+        lastEventCtx = eventCtx
         if (!isInputEvent(payload)) return { action: "continue" }
         if (!isUserSourcedInput(payload)) return { action: "continue" }
 
