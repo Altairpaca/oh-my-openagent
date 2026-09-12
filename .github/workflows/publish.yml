@@ -460,7 +460,7 @@ jobs:
               exit 1
             fi
             if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
-              echo "::error::v${VERSION} already exists as an omo release tag; a LazyCodex-only release must not reuse an omo version number. Bump to an unused version."
+              echo "::error::v${VERSION} already exists as an omo release tag; a LazyCodex-only release must not reuse a number the omo line already released. Bump to an unused version."
               exit 1
             fi
             NPM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/lazycodex-ai/${VERSION}")
