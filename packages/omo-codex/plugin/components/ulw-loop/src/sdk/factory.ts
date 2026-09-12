@@ -128,7 +128,8 @@ export function createAgentToolkit(context: ToolkitContext, deps: AgentToolkitDe
 					plan,
 					summary: summarizeUlwLoopPlan(plan),
 					nextActions: statusNextActions(plan),
-					...(active === undefined
+					// Attempt directories are an evidence-layout v2 concept; a v1 plan must not advertise one.
+					...(active === undefined || plan.evidenceLayoutVersion !== 2
 						? {}
 						: { currentAttemptDir: ulwLoopAttemptEvidenceDir(active.id, active.attempt, scope) }),
 				};
