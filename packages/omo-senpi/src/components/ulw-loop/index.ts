@@ -11,14 +11,15 @@ import { extractSessionId, resolveUlwLoopSessionScope, ulwLoopScopedGoalsPath, u
 const CONTINUATION_LIMIT = 8
 const STEERING_REMINDER = [
   "<omo-senpi-ulw-loop>",
-  "An active omo-agent-toolkit ulw-loop run is present in this working directory.",
-  "Before continuing, inspect `omo-agent-toolkit ulw-loop status --json` and use the existing .omo/ulw-loop ledger as the source of truth.",
+  "An active ulw-loop run is present in this working directory.",
+  'Before continuing, read it with the registered tool: `tool.omo_agent_toolkit({ operation: "status" })`. The session id is supplied by the host, so pass no path and spawn no CLI.',
+  "Use the returned plan plus its structured nextActions, and the existing .omo/ulw-loop ledger, as the source of truth.",
   "Continue the current ulw-loop story with evidence-bound execution; do not start unrelated work until the active run is complete or checkpointed.",
   "</omo-senpi-ulw-loop>",
 ].join("\n")
 const CONTINUATION_PROMPT = [
-  "Continue the active omo-agent-toolkit ulw-loop run.",
-  "Run `omo-agent-toolkit ulw-loop status --json` in this session cwd, inspect the active incomplete goals, and keep working until the run is complete or safely checkpointed.",
+  "Continue the active ulw-loop run.",
+  'Call `tool.omo_agent_toolkit({ operation: "status" })` in this session, inspect the active incomplete goals and the structured nextActions, and keep working until the run is complete or safely checkpointed.',
 ].join("\n")
 
 export interface UlwLoopComponentOptions {

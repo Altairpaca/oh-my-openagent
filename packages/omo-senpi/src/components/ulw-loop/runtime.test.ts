@@ -186,11 +186,10 @@ describe("omo-senpi ulw-loop default registration through the toolkit chain", ()
           sessionEventCtx(fake.dir),
         )
 
+        // No plan exists for this session, so the hook stays out of the way - and the stale binary
+        // on PATH is never executed, because the status probe is in-process now.
         expect(results).toEqual([{ action: "continue" }])
-        expect(logger.entries).toContainEqual({
-          level: "info",
-          message: "omo-senpi ulw-loop inactive; omo binary not found",
-        })
+        expect(logger.entries.map((entry) => entry.message)).not.toContain("omo-senpi ulw-loop inactive; omo binary not found")
         expect(existsSync(join(fake.dir, "argv.json"))).toBe(false)
       })
     } finally {
