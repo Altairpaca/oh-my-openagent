@@ -436,7 +436,7 @@ describe("omo launcher", () => {
     })
 
     describe("#when ulw-loop is requested", () => {
-      it("#then it reports the CLI is unavailable instead of spawning a staged runtime", () => {
+      test("#then it reports the CLI is unavailable instead of spawning a staged runtime", () => {
         const fixture = createFixture()
         const result = run(fixture, ["ulw-loop", "status", "--json"])
 
