@@ -26,22 +26,20 @@ describe("validateTaskTarget", () => {
     expect(result).toEqual({ kind: "subagent_type", subagentType: "plan-reviewer" })
   })
 
-  test("#given a legacy subagent_type #when validated #then the selection carries the canonical id and records the legacy id", () => {
+  test("#given a retired curated subagent_type #when validated #then it passes through untouched like any other name", () => {
     // when
     const result = validateTaskTarget({ prompt: "do it", subagent_type: "momus" })
 
     // then
-    expect(result).toEqual({ kind: "subagent_type", subagentType: "plan-reviewer", legacySubagentType: "momus" })
+    expect(result).toEqual({ kind: "subagent_type", subagentType: "momus" })
   })
 
-  test("#given a canonical subagent_type #when validated #then no legacy id is recorded", () => {
+  test("#given a canonical subagent_type #when validated #then the selection carries only the submitted id", () => {
     // when
     const result = validateTaskTarget({ prompt: "do it", subagent_type: "plan-consultant" })
 
     // then
-    expect(result.kind).toBe("subagent_type")
-    if (result.kind !== "subagent_type") throw new Error("expected subagent_type")
-    expect(result.legacySubagentType).toBeUndefined()
+    expect(result).toEqual({ kind: "subagent_type", subagentType: "plan-consultant" })
   })
 
   test("#given an unknown subagent_type #when validated #then it passes through untouched", () => {
@@ -52,14 +50,15 @@ describe("validateTaskTarget", () => {
     expect(result).toEqual({ kind: "subagent_type", subagentType: "custom-agent" })
   })
 
-  test("#given a batch item with a legacy subagent_type #when items are resolved #then the item carries the canonical id and the legacy id", () => {
+  test("#given a batch item with a retired curated subagent_type #when items are resolved #then the item carries the submitted id verbatim", () => {
     // when
     const result = resolveSpawnItems({ tasks: [{ prompt: "a", subagent_type: "metis" }, { prompt: "b", subagent_type: "explore" }] })
 
     // then
     expect(result.kind).toBe("ok")
     if (result.kind !== "ok") throw new Error("expected ok")
-    expect(result.items[0]).toMatchObject({ kind: "subagent_type", subagentType: "plan-consultant", legacySubagentType: "metis" })
+    expect(result.items[0]).toMatchObject({ kind: "subagent_type", subagentType: "metis" })
+    expect(result.items[0]).not.toHaveProperty("legacySubagentType")
     expect(result.items[1]).toMatchObject({ kind: "subagent_type", subagentType: "explore" })
     expect(result.items[1]).not.toHaveProperty("legacySubagentType")
   })

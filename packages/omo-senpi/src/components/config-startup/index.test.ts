@@ -280,7 +280,7 @@ describe("createConfigStartupComponent", () => {
     expect(logs).toEqual(["warn:omo-senpi: configuration diagnostics: Invalid omo config"])
   })
 
-  test("#given a legacy agents.momus key in omo.json #when session_start captures a UI #then it reports one alias-deprecation warning naming agents.plan-reviewer", async () => {
+  test("#given a retired agents.momus key in omo.json #when session_start captures a UI #then nothing is reported about it", async () => {
     // given
     const pi = new FakeExtensionAPI()
     const logs: string[] = []
@@ -301,14 +301,8 @@ describe("createConfigStartupComponent", () => {
     // when
     await pi.dispatch("session_start", {}, eventContext)
 
-    // then
-    expect(notifications).toEqual([
-      {
-        message:
-          "omo-senpi: omo.json agents.momus is deprecated; rename the key to agents.plan-reviewer. The alias is removed in the next release.",
-        type: "warning",
-      },
-    ])
+    // then: the retired key is an ordinary custom agent now, so it produces no notice at all
+    expect(notifications).toEqual([])
     expect(logs).toEqual([])
   })
 })
@@ -316,7 +310,7 @@ describe("createConfigStartupComponent", () => {
 describe("notificationMessages", () => {
   const quietMigration: SenpiStartupMigrationResult = { journalResumed: false, migratedFrom: [], results: [] }
 
-  test("#given legacy agents.momus and agents.metis keys #when notices are built #then exactly one alias-deprecated notice per legacy key is produced", () => {
+  test("#given retired agents.momus and agents.metis keys #when notices are built #then no notice is produced for them", () => {
     // given
     const config: SenpiOmoConfigResult = {
       config: { agents: { momus: { model: "omo-mock/mock-1" }, metis: { disable: true } } },
@@ -328,21 +322,8 @@ describe("notificationMessages", () => {
     // when
     const notices = notificationMessages(quietMigration, config)
 
-    // then
-    expect(notices).toEqual([
-      {
-        kind: "omo-config:agent-alias-deprecated",
-        message:
-          "omo-senpi: omo.json agents.metis is deprecated; rename the key to agents.plan-consultant. The alias is removed in the next release.",
-        type: "warning",
-      },
-      {
-        kind: "omo-config:agent-alias-deprecated",
-        message:
-          "omo-senpi: omo.json agents.momus is deprecated; rename the key to agents.plan-reviewer. The alias is removed in the next release.",
-        type: "warning",
-      },
-    ])
+    // then: the one-release alias window closed, so the keys are plain custom agents
+    expect(notices).toEqual([])
   })
 
   test("#given only canonical and custom agent keys #when notices are built #then no alias-deprecated notice is produced", () => {
@@ -358,7 +339,6 @@ describe("notificationMessages", () => {
     const notices = notificationMessages(quietMigration, config)
 
     // then
-    expect(notices.filter((notice) => notice.kind === "omo-config:agent-alias-deprecated")).toEqual([])
     expect(notices).toEqual([])
   })
 })
