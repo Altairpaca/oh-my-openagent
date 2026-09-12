@@ -185,8 +185,8 @@ describe("omo-ai publish workflow shape", () => {
     expect(publishIndex).toBeGreaterThan(originalStripIndex)
     expect(publishIndex).toBeGreaterThan(lastWrapperPublishIndex)
     expect(dedicatedStripIndex).toBe(publishIndex - 1)
-    expect(dedicatedStrip.if).toBe("needs.release-metadata.outputs.already_published != 'true'")
-    expect(publish.if).toBe("needs.release-metadata.outputs.already_published != 'true'")
+    expect(dedicatedStrip.if).toBe("needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true")
+    expect(publish.if).toBe("needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true")
     expect(publish["working-directory"]).toBe("packages/omo-native")
     expect(publish.run).toContain("npm publish --ignore-scripts --access public --provenance --tag beta")
     expect(publish.run, "omo-ai publish must hardcode --tag beta rather than DIST_TAG").not.toContain("$DIST_TAG")
@@ -196,10 +196,11 @@ describe("omo-ai publish workflow shape", () => {
   test("always runs readiness, dist-tag guard, and live verification", () => {
     // These probes moved out of publish-main into post-publish-verify: they assert registry state that is
     // already public once publish-main succeeds, so gating the release job on them could only strand a
-    // published release. They stay unconditional inside their new job.
+    // published release. Inside their new job the only gate is the LazyCodex-only mode, which
+    // publishes no omo-ai at all.
     for (const name of ["Wait for omo-ai registry readiness", "Guard omo-ai dist-tags", "Verify omo-ai live install"]) {
       const step = namedStep("post-publish-verify", name)
-      expect(step).not.toHaveProperty("if")
+      expect(step.if).toBe("inputs.lazycodex_only != true")
       expect(step.env?.OMO_AI_VERSION).toBe("${{ needs.release-metadata.outputs.omo_ai_version }}")
       expect(step.env?.ALREADY_PUBLISHED).toBe("${{ needs.release-metadata.outputs.already_published }}")
     }

@@ -27,6 +27,11 @@ on:
         required: false
         type: boolean
         default: true
+      lazycodex_only:
+        description: "Publish only LazyCodex (lazycodex-ai npm + Codex marketplace + LazyCodex GitHub release) from the base head, without stamping or publishing omo packages. Requires an explicit version."
+        required: false
+        type: boolean
+        default: false
       prepared_release_sha:
         description: "Internal: exact prepared source SHA for the provenance-bearing publish run."
         required: false
@@ -154,7 +159,9 @@ jobs:
       contents: read
     steps:
       - name: Require LazyCodex sync token
-        if: needs.release-metadata.outputs.dist_tag == ''
+        # Every channel that publishes lazycodex-ai also syncs the Codex marketplace mirror, so the
+        # token is required whenever LazyCodex is published, not only on stable releases.
+        if: inputs.publish_lazycodex == true
         env:
           LAZYCODEX_SYNC_TOKEN: ${{ secrets.LAZYCODEX_SYNC_TOKEN }}
         run: |
@@ -168,6 +175,7 @@ jobs:
           REPO: code-yeongyu/oh-my-openagent
           WORKFLOW_FILE: publish.yml
           PUBLISH_LAZYCODEX: ${{ inputs.publish_lazycodex }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
         run: |
           OIDC_TOKEN=$(curl -sH "Authorization: bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
             "${ACTIONS_ID_TOKEN_REQUEST_URL}&audience=npm:registry.npmjs.org" \
@@ -179,14 +187,18 @@ jobs:
           fi
 
           PLATFORMS=(darwin-arm64 darwin-x64 darwin-x64-baseline linux-x64 linux-x64-baseline linux-arm64 linux-x64-musl linux-x64-musl-baseline linux-arm64-musl windows-x64 windows-x64-baseline windows-arm64)
-          ALL_PACKAGES=(oh-my-opencode oh-my-openagent omo-ai)
-          if [ "${PUBLISH_LAZYCODEX}" = "true" ]; then
-            ALL_PACKAGES+=(lazycodex-ai)
+          if [ "${LAZYCODEX_ONLY}" = "true" ]; then
+            ALL_PACKAGES=(lazycodex-ai)
+          else
+            ALL_PACKAGES=(oh-my-opencode oh-my-openagent omo-ai)
+            if [ "${PUBLISH_LAZYCODEX}" = "true" ]; then
+              ALL_PACKAGES+=(lazycodex-ai)
+            fi
+            for plat in "${PLATFORMS[@]}"; do
+              ALL_PACKAGES+=("oh-my-opencode-${plat}")
+              ALL_PACKAGES+=("oh-my-openagent-${plat}")
+            done
           fi
-          for plat in "${PLATFORMS[@]}"; do
-            ALL_PACKAGES+=("oh-my-opencode-${plat}")
-            ALL_PACKAGES+=("oh-my-openagent-${plat}")
-          done
 
           FAILED=()
           for pkg in "${ALL_PACKAGES[@]}"; do
@@ -239,10 +251,11 @@ jobs:
             echo "| Result | \`${{ job.status }}\` |"
             echo "| Workflow | \`${{ github.workflow }}\` |"
             echo "| LazyCodex publish | \`${{ inputs.publish_lazycodex }}\` |"
+            echo "| LazyCodex only | \`${{ inputs.lazycodex_only }}\` |"
             echo
             echo "### What this job checks"
             echo
-            echo "- Requires the LazyCodex sync token for stable releases."
+            echo "- Requires the LazyCodex sync token whenever LazyCodex is published."
             echo "- Verifies npm trusted-publisher mappings before release writes begin."
             echo
             echo "### If this fails"
@@ -273,7 +286,22 @@ jobs:
         env:
           RAW_VERSION: ${{ inputs.version }}
           BUMP: ${{ inputs.bump }}
+          PUBLISH_LAZYCODEX: ${{ inputs.publish_lazycodex }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
         run: |
+          if [ "$LAZYCODEX_ONLY" = "true" ]; then
+            # A LazyCodex-only release never bumps from the omo registry version and is
+            # meaningless without the lazycodex-ai publish it exists to ship.
+            if [ -z "$RAW_VERSION" ]; then
+              echo "::error::lazycodex_only requires an explicit version input."
+              exit 1
+            fi
+            if [ "$PUBLISH_LAZYCODEX" != "true" ]; then
+              echo "::error::lazycodex_only requires publish_lazycodex=true."
+              exit 1
+            fi
+          fi
+
           VERSION="$RAW_VERSION"
           if [ -z "$VERSION" ]; then
             PREV=$(curl -s https://registry.npmjs.org/oh-my-opencode/latest | jq -r '.version // "0.0.0"')
@@ -342,6 +370,7 @@ jobs:
             echo "| Result | \`${{ job.status }}\` |"
             echo "| Version | \`${{ steps.version.outputs.version || 'not calculated' }}\` |"
             echo "| Dist tag | \`${{ steps.version.outputs.dist_tag || 'latest' }}\` |"
+            echo "| LazyCodex only | \`${{ inputs.lazycodex_only }}\` |"
             echo "| Previous LazyCodex | \`${{ steps.version.outputs.previous_lazycodex_version || 'none' }}\` |"
             echo
             echo "### What this job checks"
@@ -398,6 +427,7 @@ jobs:
           OMO_AI_VERSION: ${{ needs.release-metadata.outputs.omo_ai_version }}
           RELEASE_REF: ${{ github.ref_name }}
           PREPARED_RELEASE_SHA: ${{ inputs.prepared_release_sha }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
         run: |
           set -euo pipefail
 
@@ -418,6 +448,38 @@ jobs:
           git fetch origin "${BASE_REF}" --tags
 
           BASE_HEAD="$(git rev-parse "origin/${BASE_REF}")"
+
+          if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then
+            # A LazyCodex-only release publishes the base head as-is: no omo manifest is stamped and no
+            # release commit lands on the base branch. The provenance-safe child is dispatched from the
+            # lazycodex-v<version> tag namespace so it never collides with an omo release tag, and a
+            # version number is refused when either namespace or npm already carries it, so one version
+            # can never map to two different lazycodex-ai payloads.
+            if git rev-parse -q --verify "refs/tags/lazycodex-v${VERSION}" >/dev/null; then
+              echo "::error::lazycodex-v${VERSION} already exists: a LazyCodex-only release already consumed this version. Bump to an unused version."
+              exit 1
+            fi
+            if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
+              echo "::error::v${VERSION} already exists as an omo release tag; a LazyCodex-only release must not reuse a number the omo line already released. Bump to an unused version."
+              exit 1
+            fi
+            NPM_STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/lazycodex-ai/${VERSION}")
+            if [ "$NPM_STATUS" = "200" ]; then
+              echo "::error::lazycodex-ai@${VERSION} is already on npm; publishing a different tree under the same version is refused. Bump to an unused version."
+              exit 1
+            fi
+            echo "release_sha=${BASE_HEAD}" >> "$GITHUB_OUTPUT"
+            echo "needs_push=false" >> "$GITHUB_OUTPUT"
+            echo "LazyCodex-only release from origin/${BASE_REF} head ${BASE_HEAD}; no omo release state is stamped."
+            exit 0
+          fi
+
+          # A version consumed by a LazyCodex-only release already carries a lazycodex-ai payload built
+          # from a different tree; an omo release must never reuse that number.
+          if git rev-parse -q --verify "refs/tags/lazycodex-v${VERSION}" >/dev/null; then
+            echo "::error::lazycodex-v${VERSION} exists: this version was consumed by a LazyCodex-only release. Bump to an unused version so lazycodex-ai@${VERSION} keeps a single payload."
+            exit 1
+          fi
 
           # A release commit may only be REUSED when it is the current base head. A stamp that
           # sits behind the head belongs to an earlier, abandoned attempt: its tree predates every
@@ -639,6 +701,7 @@ jobs:
           BUMP: ${{ inputs.bump }}
           SKIP_PLATFORM: ${{ inputs.skip_platform }}
           PUBLISH_LAZYCODEX: ${{ inputs.publish_lazycodex }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
@@ -648,23 +711,31 @@ jobs:
             exit 1
           fi
 
+          # LazyCodex-only releases tag the source under their own namespace so the omo release
+          # path can still refuse the number (and vice versa) instead of reusing a foreign tag.
+          RELEASE_TAG="v${VERSION}"
+          if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then
+            RELEASE_TAG="lazycodex-v${VERSION}"
+          fi
+
           git fetch --force --tags
-          if git rev-parse -q --verify "refs/tags/v${VERSION}" >/dev/null; then
-            TAG_SHA="$(git rev-list --max-count=1 "v${VERSION}")"
+          if git rev-parse -q --verify "refs/tags/${RELEASE_TAG}" >/dev/null; then
+            TAG_SHA="$(git rev-list --max-count=1 "${RELEASE_TAG}")"
             if [ "$TAG_SHA" != "$RELEASE_SHA" ]; then
-              echo "::error::Existing tag v${VERSION} points to ${TAG_SHA}, not prepared release SHA ${RELEASE_SHA}."
+              echo "::error::Existing tag ${RELEASE_TAG} points to ${TAG_SHA}, not prepared release SHA ${RELEASE_SHA}."
               exit 1
             fi
           else
-            git tag "v${VERSION}" "$RELEASE_SHA"
-            git push origin "v${VERSION}"
+            git tag "${RELEASE_TAG}" "$RELEASE_SHA"
+            git push origin "${RELEASE_TAG}"
           fi
 
-          gh workflow run publish.yml --ref "v${VERSION}" \
+          gh workflow run publish.yml --ref "${RELEASE_TAG}" \
             -f "bump=${BUMP}" \
             -f "version=${VERSION}" \
             -f "skip_platform=${SKIP_PLATFORM}" \
             -f "publish_lazycodex=${PUBLISH_LAZYCODEX}" \
+            -f "lazycodex_only=${LAZYCODEX_ONLY}" \
             -f "prepared_release_sha=${RELEASE_SHA}"
 
       - name: Write job summary
@@ -694,7 +765,7 @@ jobs:
       needs.preflight-trust.result == 'success' &&
       needs.release-metadata.result == 'success' &&
       needs.prepare-release-state.result == 'success' &&
-      (inputs.skip_platform == true || needs.publish-platform.result == 'success')
+      (inputs.skip_platform == true || inputs.lazycodex_only == true || needs.publish-platform.result == 'success')
     steps:
       - uses: actions/checkout@v7
         with:
@@ -720,6 +791,7 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Verify platform packages are published
+        if: inputs.lazycodex_only != true
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
         run: |
@@ -776,7 +848,13 @@ jobs:
         id: check
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
         run: |
+          if [ "$LAZYCODEX_ONLY" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "LazyCodex-only release: oh-my-opencode is not published"
+            exit 0
+          fi
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/oh-my-opencode/${VERSION}")
           if [ "$STATUS" = "200" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -789,7 +867,13 @@ jobs:
         id: check-openagent
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
         run: |
+          if [ "$LAZYCODEX_ONLY" = "true" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "LazyCodex-only release: oh-my-openagent is not published"
+            exit 0
+          fi
           STATUS=$(curl -s -o /dev/null -w "%{http_code}" "https://registry.npmjs.org/oh-my-openagent/${VERSION}")
           if [ "$STATUS" = "200" ]; then
             echo "skip=true" >> "$GITHUB_OUTPUT"
@@ -858,6 +942,11 @@ jobs:
           mv tmp.json packages/omo-codex/plugin/.codex-plugin/plugin.json
           jq --arg v "$VERSION" '.version = $v' packages/omo-codex/plugin/package.json > tmp.json
           mv tmp.json packages/omo-codex/plugin/package.json
+          # A LazyCodex-only release builds an unstamped tree: bring the component manifests and the
+          # LazyCodex(<version>) hook status messages to the release version too (no-op when the
+          # release commit already stamped them).
+          node packages/omo-codex/plugin/scripts/sync-version.mjs
+          node packages/omo-codex/plugin/scripts/sync-hook-status-messages.mjs
           npm --prefix packages/omo-codex/plugin ci
           bun run --cwd packages/omo-codex/plugin build
 
@@ -872,11 +961,11 @@ jobs:
         run: node script/verify-npm-payload.mjs
 
       - name: Build omo-ai payload
-        if: needs.release-metadata.outputs.already_published != 'true'
+        if: needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true
         run: bun run build:omo-native
 
       - name: Verify omo-ai payload
-        if: needs.release-metadata.outputs.already_published != 'true'
+        if: needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true
         run: node script/verify-omo-ai-payload.mjs
 
       - name: Strip token auth from .npmrc to force OIDC
@@ -962,7 +1051,7 @@ jobs:
           fi
 
       - name: Strip token auth before omo-ai publish
-        if: needs.release-metadata.outputs.already_published != 'true'
+        if: needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true
         run: |
           for f in .npmrc "$HOME/.npmrc"; do
             if [ -f "$f" ]; then
@@ -973,7 +1062,7 @@ jobs:
           done
 
       - name: Publish omo-ai (beta only)
-        if: needs.release-metadata.outputs.already_published != 'true'
+        if: needs.release-metadata.outputs.already_published != 'true' && inputs.lazycodex_only != true
         working-directory: packages/omo-native
         run: npm publish --ignore-scripts --access public --provenance --tag beta
 
@@ -1000,8 +1089,10 @@ jobs:
   verify-release-notes:
     runs-on: ubuntu-latest
     needs: [release-metadata, prepare-release-state]
+    # A LazyCodex-only release creates no omo GitHub release, so it has no CHANGELOG section to verify.
     if: >-
       always() &&
+      inputs.lazycodex_only != true &&
       needs.release-metadata.result == 'success' &&
       needs.prepare-release-state.result == 'success'
     steps:
@@ -1038,6 +1129,7 @@ jobs:
       github.repository == 'code-yeongyu/oh-my-openagent' &&
       inputs.prepared_release_sha != '' &&
       inputs.skip_platform != true &&
+      inputs.lazycodex_only != true &&
       needs.gate-reuse.result == 'success' &&
       needs.preflight-trust.result == 'success' &&
       needs.release-metadata.result == 'success' &&
@@ -1058,7 +1150,7 @@ jobs:
       needs.release-metadata.result == 'success' &&
       needs.prepare-release-state.result == 'success' &&
       needs.publish-main.result == 'success' &&
-      (inputs.skip_platform == true || needs.publish-platform.result == 'success')
+      (inputs.skip_platform == true || inputs.lazycodex_only == true || needs.publish-platform.result == 'success')
     steps:
       - uses: actions/checkout@v7
         with:
@@ -1078,6 +1170,7 @@ jobs:
         run: bun install --frozen-lockfile --ignore-scripts
 
       - name: Generate changelog
+        if: inputs.lazycodex_only != true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VERSION: ${{ needs.release-metadata.outputs.version }}
@@ -1091,8 +1184,11 @@ jobs:
           cat /tmp/changelog.md
 
 
+      # The marketplace mirror and the LazyCodex GitHub release follow every channel that publishes
+      # lazycodex-ai: the 5.0.0 line ships as 5.0.0-beta.N only, and a stable-only gate left Codex
+      # marketplace users on the last 4.x for months.
       - name: Checkout LazyCodex marketplace
-        if: needs.release-metadata.outputs.dist_tag == ''
+        if: inputs.publish_lazycodex == true
         uses: actions/checkout@v7
         with:
           repository: code-yeongyu/lazycodex
@@ -1101,7 +1197,7 @@ jobs:
           fetch-depth: 0
 
       - name: Sync LazyCodex Codex marketplace
-        if: needs.release-metadata.outputs.dist_tag == ''
+        if: inputs.publish_lazycodex == true
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
           LAZYCODEX_RELEASE_VERSION: ${{ needs.release-metadata.outputs.version }}
@@ -1110,6 +1206,8 @@ jobs:
           mv tmp.json packages/omo-codex/plugin/.codex-plugin/plugin.json
           jq --arg v "$VERSION" '.version = $v' packages/omo-codex/plugin/package.json > tmp.json
           mv tmp.json packages/omo-codex/plugin/package.json
+          node packages/omo-codex/plugin/scripts/sync-version.mjs
+          node packages/omo-codex/plugin/scripts/sync-hook-status-messages.mjs
           npm --prefix packages/omo-codex/plugin ci
           bun run build:git-bash-mcp
           bun run build:lsp-tools-mcp
@@ -1131,7 +1229,7 @@ jobs:
 
       - name: Resolve LazyCodex release payload
         id: lazycodex-release-state
-        if: needs.release-metadata.outputs.dist_tag == ''
+        if: inputs.publish_lazycodex == true
         env:
           PREVIOUS_LAZYCODEX_VERSION: ${{ needs.release-metadata.outputs.previous_lazycodex_version }}
         run: |
@@ -1166,9 +1264,11 @@ jobs:
           echo "previous_lazycodex_version=${PREVIOUS_LAZYCODEX_VERSION}" >> "$GITHUB_OUTPUT"
 
       - name: Create LazyCodex GitHub release
-        if: needs.release-metadata.outputs.dist_tag == '' && steps.lazycodex-release-state.outputs.lazycodex_changed == 'true'
+        if: inputs.publish_lazycodex == true && steps.lazycodex-release-state.outputs.lazycodex_changed == 'true'
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
+          RELEASE_SHA: ${{ needs.prepare-release-state.outputs.release_sha }}
+          LAZYCODEX_ONLY: ${{ inputs.lazycodex_only }}
           PREVIOUS_LAZYCODEX_VERSION: ${{ steps.lazycodex-release-state.outputs.previous_lazycodex_version }}
           GH_TOKEN: ${{ secrets.LAZYCODEX_SYNC_TOKEN }}
         run: |
@@ -1177,12 +1277,19 @@ jobs:
           # must fail the step instead of silently mis-assigning the badge.
           set -euo pipefail
 
+          if [ "${LAZYCODEX_ONLY:-}" = "true" ]; then
+            SOURCE_DESC="oh-my-openagent ${RELEASE_SHA} (LazyCodex-only release)"
+          else
+            SOURCE_DESC="oh-my-openagent v${VERSION} (${RELEASE_SHA})"
+          fi
           {
-            printf '%s\n' "Synced Codex Light marketplace payload from oh-my-openagent v${VERSION}."
+            printf '%s\n' "Synced Codex Light marketplace payload from ${SOURCE_DESC}."
             printf '%s\n' ""
             printf '%s\n' "Compared against: lazycodex-ai@${PREVIOUS_LAZYCODEX_VERSION}"
           } > /tmp/lazycodex-release-notes.md
 
+          # Same badge rule as the omo release above (#7743): never `--prerelease`, Latest decided by
+          # the highest published semver, so a later stable outranks every beta on the mirror too.
           LATEST_FLAG="$(gh release list --repo code-yeongyu/lazycodex --exclude-drafts --limit 1000 --json tagName --jq '.[].tagName' | bun script/release-latest-flag.ts "$VERSION")"
           gh release view "v${VERSION}" --repo code-yeongyu/lazycodex >/dev/null 2>&1 || \
             gh release create "v${VERSION}" "$LATEST_FLAG" --repo code-yeongyu/lazycodex --target main --title "v${VERSION}" --notes-file /tmp/lazycodex-release-notes.md
@@ -1199,6 +1306,7 @@ jobs:
         # release. That badge is load-bearing: `releases/latest/download/<asset>`
         # is the URL the compiled omo binary's self-update hint resolves against
         # (packages/omo-native/compile-entry.ts).
+        if: inputs.lazycodex_only != true
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1213,7 +1321,7 @@ jobs:
             gh release create "v${VERSION}" "$LATEST_FLAG" --title "v${VERSION}" --notes-file /tmp/changelog.md
 
       - name: Download release-binary artifacts
-        if: inputs.skip_platform != true
+        if: inputs.skip_platform != true && inputs.lazycodex_only != true
         uses: actions/download-artifact@v8
         with:
           pattern: release-binary-*
@@ -1224,7 +1332,7 @@ jobs:
         # Runs for both stable and dist-tagged releases: the compiled binaries
         # and SHA256SUMS are part of the release contract on every channel.
         # skip_platform reruns rely on the assets a prior run already uploaded.
-        if: inputs.skip_platform != true
+        if: inputs.skip_platform != true && inputs.lazycodex_only != true
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1245,6 +1353,7 @@ jobs:
         # upload is --clobber-idempotent and the per-target build is
         # unconditional, so this can only stay green when the release actually
         # carries its 13 assets (12 per-target omo binaries + SHA256SUMS).
+        if: inputs.lazycodex_only != true
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1263,6 +1372,7 @@ jobs:
           echo "Verified ${ASSET_COUNT}/13 release assets for v${VERSION}"
 
       - name: Delete draft release
+        if: inputs.lazycodex_only != true
         run: gh release delete next --yes 2>/dev/null || true
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -1277,6 +1387,7 @@ jobs:
         # Fast-forward only: master always trails the new tag (releases move
         # forward on dev), so the direct refspec push is a clean FF and satisfies
         # the branch ruleset's non_fast_forward rule without needing a bypass.
+        if: inputs.lazycodex_only != true
         continue-on-error: true
         env:
           VERSION: ${{ needs.release-metadata.outputs.version }}
@@ -1322,6 +1433,7 @@ jobs:
           registry-url: "https://registry.npmjs.org"
 
       - name: Wait for omo-ai registry readiness
+        if: inputs.lazycodex_only != true
         env:
           OMO_AI_VERSION: ${{ needs.release-metadata.outputs.omo_ai_version }}
           ALREADY_PUBLISHED: ${{ needs.release-metadata.outputs.already_published }}
@@ -1357,6 +1469,7 @@ jobs:
           done
 
       - name: Guard omo-ai dist-tags
+        if: inputs.lazycodex_only != true
         env:
           OMO_AI_VERSION: ${{ needs.release-metadata.outputs.omo_ai_version }}
           ALREADY_PUBLISHED: ${{ needs.release-metadata.outputs.already_published }}
@@ -1378,6 +1491,7 @@ jobs:
           fi
 
       - name: Verify omo-ai live install
+        if: inputs.lazycodex_only != true
         env:
           OMO_AI_VERSION: ${{ needs.release-metadata.outputs.omo_ai_version }}
           ALREADY_PUBLISHED: ${{ needs.release-metadata.outputs.already_published }}
