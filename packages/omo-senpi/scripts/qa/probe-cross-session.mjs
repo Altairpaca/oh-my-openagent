@@ -6,13 +6,12 @@ import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
-import { toSpawnTarget } from "../../src/components/ulw-loop/omo-command.ts"
 
 const scriptPath = fileURLToPath(import.meta.url)
 const repoRoot = join(dirname(scriptPath), "../../../..")
-// Native no longer stages a toolkit CLI; this probe drives the component's own built CLI, which is
-// what the Codex compatibility lane still ships.
-const toolkitBin = join(repoRoot, "packages/omo-codex/plugin/components/ulw-loop/dist/cli.js")
+// Native no longer stages a toolkit CLI. This probe drives the component's CLI from source with the
+// runtime already executing this script, so it needs no build step and no staged payload.
+const toolkitBin = join(repoRoot, "packages/omo-codex/plugin/components/ulw-loop/src/cli.ts")
 // Senpi never puts a session id on the extension host's process.env, so the host-with-no-session-identity
 // scenario is the one that actually models production. It must never continue an unscoped run.
 const NO_SESSION = "--no-session"
@@ -195,8 +194,7 @@ function runChild(cwd, sessionId) {
 }
 
 function runToolkit(args, cwd, sessionId, expectedStatus) {
-  const target = toSpawnTarget(toolkitBin, args)
-  const child = spawnSync(target.command, [...target.args], {
+  const child = spawnSync(process.execPath, [toolkitBin, ...args], {
     cwd,
     env: sessionEnv(sessionId),
     encoding: "utf8",
