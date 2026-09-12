@@ -36,14 +36,19 @@ const DEFAULT_GRACE_MS = 5_000
 const DEFAULT_MAX_OUTPUT_BYTES = 64 * 1024
 const MAX_DISTILLED_SUPERVISOR_CAUSE_CHARS = 240
 const SUPERVISOR_ERROR_LINE = /^(?:[A-Za-z][A-Za-z]*Error|error):\s*(.+)$/u
+// A sealed tail can start mid-line and slice the "error:" prefix the distiller matches on.
+// Look past the sealed budget far enough to reach the beginning of the retained error line.
+const SUPERVISOR_CAUSE_READ_SLACK_BYTES = MAX_DISTILLED_SUPERVISOR_CAUSE_CHARS + 16
 // Publication can still be waiting for the terminal gate after the child deadline expires.
 // Keep the parent alive for one additional default grace window so the durable outcome can land.
 const OUTCOME_PUBLICATION_MARGIN_MS = 5_000
 
-async function boundSupervisorStderr(path: string, maxBytes: number): Promise<string> {
-  const stderr = await readRunTextTail(path, maxBytes)
-  await writeRunTextAtomic(path, stderr)
-  return stderr
+async function readSupervisorFailureCause(path: string, maxBytes: number): Promise<string | undefined> {
+  return distillSupervisorFailure(await readRunTextTail(path, maxBytes + SUPERVISOR_CAUSE_READ_SLACK_BYTES))
+}
+
+async function boundSupervisorStderr(path: string, maxBytes: number): Promise<void> {
+  await writeRunTextAtomic(path, await readRunTextTail(path, maxBytes))
 }
 
 function distillSupervisorFailure(stderr: string): string | undefined {
@@ -243,8 +248,9 @@ async function runSupervisedChild(input: {
   })
   if (result.kind === "error" && !hasCompleteOutcome()) throw result.error
   if (result.kind === "close" && !hasCompleteOutcome()) {
-    const supervisorStderr = await boundSupervisorStderr(supervisorStderrPath, input.maxOutputBytes)
-    const cause = distillSupervisorFailure(supervisorStderr)
+    // Read the cause before sealing the log: the bounded tail can slice the error line's prefix.
+    const cause = await readSupervisorFailureCause(supervisorStderrPath, input.maxOutputBytes)
+    await boundSupervisorStderr(supervisorStderrPath, input.maxOutputBytes)
     throw new Error(
       `memory run supervisor exited with ${result.exit.code ?? result.exit.signal ?? "unknown status"}${cause ? `: ${cause}` : ""}`,
     )
