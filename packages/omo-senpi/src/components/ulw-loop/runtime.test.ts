@@ -2,6 +2,7 @@ import { describe, expect, it } from "bun:test"
 import { existsSync, readFileSync, realpathSync } from "node:fs"
 import { delimiter, join } from "node:path"
 
+import { createAgentToolkit } from "../../../../omo-codex/plugin/components/ulw-loop/src/sdk.js"
 import { FakeExtensionAPI } from "../../../test-support/fake-extension-api"
 import { __testInternals, createUlwLoopComponent } from "./index"
 import {
@@ -15,6 +16,7 @@ import {
   readRunnerRuntime,
   sessionEventCtx,
   statusArgsFor,
+  TEST_SESSION_ID,
   withEnv,
   withEnvAsync,
 } from "./ulw-loop.test-support"
@@ -135,11 +137,18 @@ describe("omo-senpi ulw-loop resolveOmoBin toolkit-first chain", () => {
 })
 
 describe("omo-senpi ulw-loop default registration through the toolkit chain", () => {
-  it("#given a PATH omo-agent-toolkit and no envs #when the component registers with defaults #then the toolkit binary receives the status argv", async () => {
+  it("#given a PATH omo-agent-toolkit and a real session plan #when the component registers with defaults #then status is read in-process and the toolkit binary is never executed", async () => {
     const fake = createTempOmoBin(activeStatus("DEFAULT-REGISTRATION"), "omo-agent-toolkit")
     const path = process.env.PATH ? `${fake.dir}${delimiter}${process.env.PATH}` : fake.dir
     try {
       await withEnvAsync({ OMO_AGENT_TOOLKIT_BIN: undefined, OMO_BIN: undefined, PATH: path }, async () => {
+        const seeded = await createAgentToolkit({
+          cwd: fake.dir,
+          sessionId: TEST_SESSION_ID,
+          surface: "omo-senpi",
+        }).createGoals({ brief: "- alpha goal", force: true })
+        expect(seeded.ok).toBe(true)
+
         const pi = new FakeExtensionAPI()
         await createUlwLoopComponent().register(pi, {
           logger: createLogger(),
@@ -154,7 +163,7 @@ describe("omo-senpi ulw-loop default registration through the toolkit chain", ()
 
         expect(results).toHaveLength(1)
         expect(results[0]).toMatchObject({ action: "transform" })
-        expect(readRunnerArgv(fake.dir)).toEqual(statusArgsFor())
+        expect(existsSync(join(fake.dir, "argv.json"))).toBe(false)
       })
     } finally {
       fake.cleanup()

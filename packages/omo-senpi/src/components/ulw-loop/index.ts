@@ -6,6 +6,7 @@ import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../
 import { createAgentToolkitTool } from "./agent-toolkit-tool"
 import { createUlwLoopFooterStatus, goalPathsFromContext, type UlwLoopFooterStatusOptions } from "./footer-status"
 import { resolveOmoBin, runOmoCommand } from "./omo-command"
+import { readUlwLoopStatusInProcess, sessionIdFromStatusArgs } from "./status-source"
 import { extractSessionId, resolveUlwLoopSessionScope, ulwLoopScopedGoalsPath, ulwLoopStatusArgs } from "./session-scope"
 
 const CONTINUATION_LIMIT = 8
@@ -57,7 +58,15 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
         return
       }
 
-      const runCommand = options.runCommand ?? runOmoCommand
+      // Native never spawns the toolkit for its own control plane any more: the default reader is the
+      // in-process SDK, and options.runCommand stays as the injected seam for tests.
+      const runCommand: RunCommand =
+        options.runCommand ??
+        (async (_bin, args, commandOptions) => {
+          const sessionId = sessionIdFromStatusArgs(args)
+          if (sessionId === undefined) return { code: 1, stdout: JSON.stringify({ ok: false, error: { code: "ULW_LOOP_SESSION_ID_REQUIRED" } }) }
+          return readUlwLoopStatusInProcess(commandOptions.cwd, sessionId)
+        })
       const planExists = options.planExists ?? ulwLoopPlanExists
       const footerStatus = createUlwLoopFooterStatus(options.footerStatus)
       const state = {
