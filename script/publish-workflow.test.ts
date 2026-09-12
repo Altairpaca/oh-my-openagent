@@ -109,8 +109,9 @@ describe("test workflows", () => {
     const validatesDispatchSource = prepareJob.includes("PREPARED_RELEASE_SHA: ${{ inputs.prepared_release_sha }}") &&
       prepareJob.includes('"$PREPARED_RELEASE_SHA" != "$GITHUB_SHA"')
     const dispatchesPinnedTagRun =
-      dispatchJob.includes('git tag "v${VERSION}" "$RELEASE_SHA"') &&
-      dispatchJob.includes('gh workflow run publish.yml --ref "v${VERSION}"') &&
+      dispatchJob.includes('RELEASE_TAG="v${VERSION}"') &&
+      dispatchJob.includes('git tag "${RELEASE_TAG}" "$RELEASE_SHA"') &&
+      dispatchJob.includes('gh workflow run publish.yml --ref "${RELEASE_TAG}"') &&
       dispatchJob.includes('prepared_release_sha=${RELEASE_SHA}')
     const provenanceOperationsRequirePinnedRun =
       publishMainJob.includes("inputs.prepared_release_sha != ''") &&
