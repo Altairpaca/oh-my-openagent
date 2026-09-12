@@ -49,14 +49,10 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
   return {
     name: "ulw-loop",
     async register(pi: SenpiExtensionAPI, ctx: ComponentContext): Promise<void> {
-      const omoBin = (options.resolveOmoBin ?? resolveOmoBin)()
-      if (omoBin === null) {
-        ctx.logger.info("omo-senpi ulw-loop inactive; omo binary not found")
-        pi.on("input", () => ({ action: "continue" }))
-        pi.on("agent_end", () => undefined)
-        return
-      }
-
+      // The control plane is in-process now, so a missing toolkit CLI no longer disables this
+      // component: the typed tool and the status probe both run through the SDK. The resolved bin
+      // is kept only for the injected runCommand seam tests still drive.
+      const omoBin = (options.resolveOmoBin ?? resolveOmoBin)() ?? ""
       // Native never spawns the toolkit for its own control plane any more: the default reader is the
       // in-process SDK, and options.runCommand stays as the injected seam for tests.
       const runCommand: RunCommand =
