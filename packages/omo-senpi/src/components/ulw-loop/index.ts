@@ -3,7 +3,8 @@ import { existsSync } from "node:fs"
 import { readAgentEndOutcome } from "../ulw-execute-continuation/agent-end-eligibility"
 import { findContinuableBoulderWork } from "../ulw-execute-continuation/boulder-eligibility"
 import type { ComponentContext, OmoSenpiComponent, SenpiExtensionAPI } from "../../extension/types"
-import { createUlwLoopFooterStatus, type UlwLoopFooterStatusOptions } from "./footer-status"
+import { createAgentToolkitTool } from "./agent-toolkit-tool"
+import { createUlwLoopFooterStatus, goalPathsFromContext, type UlwLoopFooterStatusOptions } from "./footer-status"
 import { resolveOmoBin, runOmoCommand } from "./omo-command"
 import { extractSessionId, resolveUlwLoopSessionScope, ulwLoopScopedGoalsPath, ulwLoopStatusArgs } from "./session-scope"
 
@@ -67,12 +68,25 @@ export function createUlwLoopComponent(options: UlwLoopComponentOptions = {}): O
         pendingRun: undefined as { payload: unknown; status: ActiveStatus } | undefined,
       }
 
+      // The tool is registered once, but every call must bind to the session the host is serving
+      // right now, so the latest event context is what resolves cwd, session id, and goal store.
+      let lastEventCtx: unknown
+      pi.registerTool({
+        ...createAgentToolkitTool({
+          resolveCwd: () => cwdFromContext(lastEventCtx),
+          resolveSessionId: () => resolveUlwLoopSessionScope(lastEventCtx) ?? undefined,
+          resolveGoalPaths: () => goalPathsFromContext(lastEventCtx),
+        }),
+      })
+
       pi.on("session_start", async (_payload, eventCtx) => {
+        lastEventCtx = eventCtx
         const status = await readActiveStatus(omoBin, runCommand, planExists, eventCtx, ctx)
         footerStatus.sync(eventCtx, status?.active ?? false)
       })
 
       pi.on("input", async (payload, eventCtx) => {
+        lastEventCtx = eventCtx
         if (!isInputEvent(payload)) return { action: "continue" }
         if (!isUserSourcedInput(payload)) return { action: "continue" }
 
