@@ -1,0 +1,46 @@
+name: Altair isolated build-check QA
+
+on:
+  push:
+    branches: [qa/9568-extension-output-gate-20261008]
+    paths: [.github/workflows/altair-9568-qa.yml, qa-inputs/9568.patch]
+
+permissions:
+  contents: read
+
+jobs:
+  bootstrap:
+    if: github.repository == 'Altairpaca/oh-my-openagent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Capture public source and toolchain for isolated local verification
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p "$RUNNER_TEMP/omo-9568-bootstrap"
+          cp "$(command -v bun)" "$RUNNER_TEMP/omo-9568-bootstrap/bun"
+          cp "$(command -v node)" "$RUNNER_TEMP/omo-9568-bootstrap/node"
+          git archive --format=tar 8a30e8358cbcc31a0410f0174c1a43ec7a6cd647 | gzip > "$RUNNER_TEMP/omo-9568-bootstrap/source.tar.gz"
+          {
+            printf 'source=8a30e8358cbcc31a0410f0174c1a43ec7a6cd647\n'
+            bun --version
+            node --version
+            sha256sum "$RUNNER_TEMP/omo-9568-bootstrap/"{bun,node,source.tar.gz}
+          } > "$RUNNER_TEMP/omo-9568-bootstrap/manifest.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: omo-9568-bootstrap
+          path: ${{ runner.temp }}/omo-9568-bootstrap/
+          retention-days: 3
+          compression-level: 6
+          if-no-files-found: error
