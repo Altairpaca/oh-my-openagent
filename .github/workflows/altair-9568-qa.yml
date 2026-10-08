@@ -27,6 +27,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          git fetch --depth=1 origin 8a30e8358cbcc31a0410f0174c1a43ec7a6cd647
           mkdir -p "$RUNNER_TEMP/omo-9568-bootstrap"
           cp "$(command -v bun)" "$RUNNER_TEMP/omo-9568-bootstrap/bun"
           cp "$(command -v node)" "$RUNNER_TEMP/omo-9568-bootstrap/node"
