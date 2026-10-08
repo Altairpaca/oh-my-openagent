@@ -9,10 +9,10 @@ permissions:
   contents: read
 
 jobs:
-  bootstrap:
+  verify:
     if: github.repository == 'Altairpaca/oh-my-openagent'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v7
         with:
@@ -23,25 +23,135 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: '1.4.2'
-      - name: Capture public source and toolchain for isolated local verification
+      - name: Prepare task-owned checkout and evidence
         shell: bash
         run: |
           set -euo pipefail
-          git fetch --depth=1 origin 8a30e8358cbcc31a0410f0174c1a43ec7a6cd647
-          mkdir -p "$RUNNER_TEMP/omo-9568-bootstrap"
-          cp "$(command -v bun)" "$RUNNER_TEMP/omo-9568-bootstrap/bun"
-          cp "$(command -v node)" "$RUNNER_TEMP/omo-9568-bootstrap/node"
-          git archive --format=tar 8a30e8358cbcc31a0410f0174c1a43ec7a6cd647 | gzip > "$RUNNER_TEMP/omo-9568-bootstrap/source.tar.gz"
-          {
-            printf 'source=8a30e8358cbcc31a0410f0174c1a43ec7a6cd647\n'
-            bun --version
-            node --version
-            sha256sum "$RUNNER_TEMP/omo-9568-bootstrap/"{bun,node,source.tar.gz}
-          } > "$RUNNER_TEMP/omo-9568-bootstrap/manifest.txt"
+          base=8a30e8358cbcc31a0410f0174c1a43ec7a6cd647
+          git fetch --depth=1 origin "$base"
+          work="$RUNNER_TEMP/omo-9568-work"
+          git worktree add --detach "$work" "$base"
+          cd "$work"
+          ev="$(node .agents/skills/senpi-qa/scripts/resolve-evidence-dir.mjs --repo-root "$work" --slug 20261008-9568-build-output-gate)"
+          mkdir -p "$ev"
+          printf 'BASE=%s\nWORK=%s\nEV=%s\n' "$base" "$work" "$ev" >> "$GITHUB_ENV"
+          printf 'Plan: apply the candidate without committing it; capture RED/GREEN real-build tests, tracking fault injections, typecheck and isolated live Senpi QA. Evidence remains ignored. No release or publish operations.\n' > "$ev/plan.txt"
+          sed 's/^ diff --git /diff --git /' "$GITHUB_WORKSPACE/qa-inputs/9568.patch" > "$ev/candidate.patch"
+          git apply --check "$ev/candidate.patch"
+          git apply "$ev/candidate.patch"
+          sha256sum "$ev/candidate.patch" > "$ev/candidate.sha256"
+          git submodule update --init --recursive > "$ev/submodules.log" 2>&1
+      - name: Install the pinned workspace dependencies
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          bun install --frozen-lockfile --ignore-scripts > "$EV/install.log" 2>&1
+          printf '%s\n' "$WORK/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Prove the regression against the original checker
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          checker=packages/omo-senpi/plugin/scripts/check-extension-current.mjs
+          cp "$checker" "$EV/patched-checker.mjs"
+          git show "$BASE:$checker" > "$checker"
+          set +e
+          bun test packages/omo-senpi/plugin/scripts/check-extension-output-coverage.test.mjs > "$EV/red.log" 2>&1
+          status=$?
+          set -e
+          cp "$EV/patched-checker.mjs" "$checker"
+          printf '%s\n' "$status" > "$EV/red.exit"
+          test "$status" -ne 0
+          grep -q '3 fail' "$EV/red.log"
+          grep -q '1 pass' "$EV/red.log"
+      - name: Verify scoped tests and types
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          bun test packages/omo-senpi/plugin/scripts/check-extension-output-coverage.test.mjs packages/omo-senpi/plugin/scripts/check-tracked-outputs.test.mjs packages/omo-senpi/plugin/scripts/build-extension.test.mjs packages/omo-senpi/plugin/scripts/build-extension-runtimes.test.mjs > "$EV/green.log" 2>&1
+          node_modules/.bin/tsgo --noEmit -p packages/omo-senpi/tsconfig.json > "$EV/typecheck.log" 2>&1
+          git diff --check > "$EV/diff-check.log" 2>&1
+      - name: Build the native plugin and verify the actual CLI gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          bun run build:senpi-plugin > "$EV/build.log" 2>&1
+          node packages/omo-senpi/plugin/scripts/build-extension.mjs --check > "$EV/cli-happy.log" 2>&1
+          sidecar=packages/omo-senpi/plugin/extensions/gateway-rules-extension.mjs
+          git rm --cached --force -- "$sidecar"
+          set +e
+          node packages/omo-senpi/plugin/scripts/build-extension.mjs --check > "$EV/cli-untracked.log" 2>&1
+          status=$?
+          set -e
+          git reset HEAD -- "$sidecar"
+          test "$status" -eq 1
+          grep -q 'untracked-output' "$EV/cli-untracked.log"
+          grep -q 'gateway-rules-extension.mjs' "$EV/cli-untracked.log"
+          cp packages/omo-senpi/.gitignore "$EV/original.gitignore"
+          sed -i '/^!\/plugin\/extensions\/gateway-rules-extension.mjs$/d' packages/omo-senpi/.gitignore
+          set +e
+          node packages/omo-senpi/plugin/scripts/build-extension.mjs --check > "$EV/cli-ignored.log" 2>&1
+          status=$?
+          set -e
+          cp "$EV/original.gitignore" packages/omo-senpi/.gitignore
+          test "$status" -eq 1
+          grep -q 'ignored-output' "$EV/cli-ignored.log"
+          grep -q 'gateway-rules-extension.mjs' "$EV/cli-ignored.log"
+          git diff --stat > "$EV/diff-stat.log"
+      - name: Exercise the real Senpi binary in its isolated driver
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          node packages/omo-senpi/scripts/qa/drive.mjs --self-test > "$EV/driver-self-test.log" 2>&1
+          test -x node_modules/.bin/senpi
+          SENPI_BIN="$WORK/node_modules/.bin/senpi" node packages/omo-senpi/scripts/qa/drive.mjs > "$EV/live-driver.json" 2> "$EV/live-driver.stderr"
+          node --input-type=module -e 'import fs from "node:fs"; const r=JSON.parse(fs.readFileSync(process.env.EV+"/live-driver.json","utf8")); if(r.result!=="PASS" || r.ultraworkInjected!==true || r.realSenpiUntouched!==true) throw new Error(JSON.stringify(r)); console.log(JSON.stringify({result:r.result,realSenpiUntouched:r.realSenpiUntouched,ultraworkInjected:r.ultraworkInjected}));'
+      - name: Run the complete Senpi package gate
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          bun run test:senpi > "$EV/package-gate.log" 2>&1
+      - name: Capture evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          if test -n "${EV:-}" && test -d "$EV"; then
+            cd "$EV"
+            sha256sum ./*.log ./*.json ./*.exit ./*.patch ./*.stderr > SHA256SUMS 2>/dev/null || true
+            printf 'Workflow run: %s\nCandidate base: %s\n' "$GITHUB_RUN_ID" "${BASE:-unavailable}" > run.txt
+          fi
       - uses: actions/upload-artifact@v4
+        if: always()
         with:
-          name: omo-9568-bootstrap
-          path: ${{ runner.temp }}/omo-9568-bootstrap/
-          retention-days: 3
-          compression-level: 6
+          name: omo-9568-qa-evidence
+          path: ${{ runner.temp }}/omo-9568-work/.omo/evidence/omo-senpi-adapter/20261008-9568-build-output-gate/
+          retention-days: 7
           if-no-files-found: error
+          include-hidden-files: true
+  git-portability:
+    if: github.repository == 'Altairpaca/oh-my-openagent'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Exercise real Git on this platform
+        shell: bash
+        run: |
+          set -euo pipefail
+          sed 's/^ diff --git /diff --git /' qa-inputs/9568.patch > "$RUNNER_TEMP/9568.patch"
+          git apply "$RUNNER_TEMP/9568.patch"
+          node --test packages/omo-senpi/plugin/scripts/check-tracked-outputs.test.mjs
