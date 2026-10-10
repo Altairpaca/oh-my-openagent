@@ -1,0 +1,191 @@
+name: Altair 9805 materializer QA
+on:
+  push:
+    branches: [qa/9805-submodule-retry-20261010]
+    paths: [.github/workflows/altair-9805-qa.yml, qa-inputs/9805-materializer.mjs, qa-inputs/9805-test.mjs]
+permissions:
+  contents: read
+jobs:
+  portable-cli:
+    if: github.repository == 'Altairpaca/oh-my-openagent'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Run original and patched CLI contracts
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=762839e5551317d04086bb7b4e49b25ad175bd92
+          git fetch --depth=1 origin "$base"
+          work="$RUNNER_TEMP/omo-9805-portable"
+          git worktree add --detach "$work" "$base"
+          ev="$work/.omo/evidence/20261010-9805-portable"
+          mkdir -p "$ev"
+          cd "$work"
+          testfile=packages/omo-codex/plugin/test/materialize-shared-upstreams.test.mjs
+          script=packages/omo-codex/plugin/scripts/materialize-shared-upstreams.mjs
+          cp "$GITHUB_WORKSPACE/qa-inputs/9805-test.mjs" "$testfile"
+          set +e
+          node --test "$testfile" > "$ev/red.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -ne 0
+          grep -q '# pass 2' "$ev/red.log"
+          grep -q '# fail 9' "$ev/red.log"
+          cp "$GITHUB_WORKSPACE/qa-inputs/9805-materializer.mjs" "$script"
+          node --test "$testfile" > "$ev/green.log" 2>&1
+          grep -q '# pass 11' "$ev/green.log"
+          grep -q '# fail 0' "$ev/green.log"
+          git hash-object "$script" "$testfile" > "$ev/source-blobs.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omo-9805-cli-${{ matrix.os }}
+          path: ${{ runner.temp }}/omo-9805-portable/.omo/evidence/20261010-9805-portable/
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
+  full-qa:
+    if: github.repository == 'Altairpaca/oh-my-openagent'
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: '1.4.2'
+      - name: Prepare isolated candidate and evidence plan
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=762839e5551317d04086bb7b4e49b25ad175bd92
+          git fetch --depth=1 origin "$base"
+          work="$RUNNER_TEMP/omo-9805-full"
+          git worktree add --detach "$work" "$base"
+          cd "$work"
+          ev="$work/.omo/evidence/20261010-9805-retry"
+          senpi_ev="$(node .agents/skills/senpi-qa/scripts/resolve-evidence-dir.mjs --repo-root "$work" --slug 20261010-9805-shared-build)"
+          mkdir -p "$ev" "$senpi_ev"
+          printf 'BASE=%s\nWORK=%s\nEV=%s\nSENPI_EV=%s\n' "$base" "$work" "$ev" "$senpi_ev" >> "$GITHUB_ENV"
+          printf '%s\n' 'Goal: bounded pinned-submodule retry, original strict/best-effort semantics, and real pin diagnostics. Test the uncommitted shipped CLI candidate, then real Git fault injection, complete Codex gate, isolated local-build installation and real mock-provider Codex/Senpi drives. No publishing, releases, secrets or user-home changes. Test-only transport mocks do not add a production seam.' > "$ev/plan.txt"
+          script=packages/omo-codex/plugin/scripts/materialize-shared-upstreams.mjs
+          testfile=packages/omo-codex/plugin/test/materialize-shared-upstreams.test.mjs
+          cp "$script" "$ev/original-materializer.mjs"
+          cp "$GITHUB_WORKSPACE/qa-inputs/9805-materializer.mjs" "$script"
+          cp "$GITHUB_WORKSPACE/qa-inputs/9805-test.mjs" "$testfile"
+          git add -N "$testfile"
+          git diff --check
+          git diff --binary > "$ev/candidate.patch"
+          git diff --stat > "$ev/diff-stat.txt"
+          sha256sum "$script" "$testfile" > "$ev/source-sha256.txt"
+          mkdir -p "$ev/source"
+          cp --parents "$script" "$testfile" "$ev/source"
+          git submodule update --init --recursive > "$ev/submodules.log" 2>&1
+          bun install --frozen-lockfile --ignore-scripts > "$ev/install.log" 2>&1
+          printf '%s\n' "$work/node_modules/.bin" >> "$GITHUB_PATH"
+      - name: Real Git and materializer CLI fault injection
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          script=packages/omo-codex/plugin/scripts/materialize-shared-upstreams.mjs
+          real_git="$(command -v git)"
+          mkdir -p "$EV/git-shim"
+          cat > "$EV/git-shim/git" <<'SHIM'
+          #!/usr/bin/env bash
+          set -euo pipefail
+          if [ "${1:-}" = submodule ] && [ "${2:-}" = update ]; then
+            n="$(cat "$QA_COUNT")"
+            n=$((n + 1))
+            printf '%s\n' "$n" > "$QA_COUNT"
+            if [ "$QA_MODE" = persistent ] || [ "$n" -eq 1 ]; then
+              echo 'fatal: injected transient Git transport failure' >&2
+              exit 128
+            fi
+          fi
+          exec "$QA_REAL_GIT" "$@"
+          SHIM
+          chmod +x "$EV/git-shim/git"
+          cp "$script" "$EV/patched-materializer.mjs"
+          cp "$EV/original-materializer.mjs" "$script"
+          echo 0 > "$EV/git-count.txt"
+          set +e
+          QA_COUNT="$EV/git-count.txt" QA_MODE=transient QA_REAL_GIT="$real_git" PATH="$EV/git-shim:$PATH" node "$script" --strict > "$EV/real-cli-red.log" 2>&1
+          status=$?
+          set -e
+          cp "$EV/patched-materializer.mjs" "$script"
+          test "$status" -eq 1
+          test "$(cat "$EV/git-count.txt")" -eq 1
+          echo 0 > "$EV/git-count.txt"
+          QA_COUNT="$EV/git-count.txt" QA_MODE=transient QA_REAL_GIT="$real_git" PATH="$EV/git-shim:$PATH" node "$script" --strict > "$EV/real-cli-recovered.log" 2>&1
+          test "$(cat "$EV/git-count.txt")" -eq 2
+          echo 0 > "$EV/git-count.txt"
+          set +e
+          QA_COUNT="$EV/git-count.txt" QA_MODE=persistent QA_REAL_GIT="$real_git" PATH="$EV/git-shim:$PATH" node "$script" --strict > "$EV/real-cli-exhausted.log" 2>&1
+          status=$?
+          set -e
+          test "$status" -eq 1
+          test "$(cat "$EV/git-count.txt")" -eq 3
+          node --input-type=module -e 'import {execFileSync} from "node:child_process";import fs from "node:fs";const log=fs.readFileSync(process.env.EV+"/real-cli-exhausted.log","utf8");const rows=execFileSync("git",["ls-files","--stage","-z","--","packages/shared-skills/upstreams"],{encoding:"utf8"}).split("\0");let n=0;for(const row of rows){const m=/^160000 ([0-9a-f]{40}) 0\t(.+)$/.exec(row);if(m){if(!log.includes(m[2]+"@"+m[1]))throw Error("missing pinned diagnostic: "+m[2]);n++;}}if(n!==4)throw Error("unexpected gitlink inventory: "+n);console.log("Verified four real index-pinned submodule diagnostics");' > "$EV/real-pin-check.log"
+          echo 0 > "$EV/git-count.txt"
+          QA_COUNT="$EV/git-count.txt" QA_MODE=persistent QA_REAL_GIT="$real_git" PATH="$EV/git-shim:$PATH" node "$script" > "$EV/real-cli-best-effort.log" 2>&1
+          test "$(cat "$EV/git-count.txt")" -eq 3
+          sha256sum -c "$EV/source-sha256.txt"
+      - name: Run complete Codex gate and types
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          bun run test:codex > "$EV/codex-gate.log" 2>&1
+          node_modules/.bin/tsgo --noEmit -p packages/omo-codex/tsconfig.json > "$EV/codex-typecheck.log" 2>&1
+      - name: Drive real Codex with the local build and mock provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          npm install --prefix "$RUNNER_TEMP/codex-qa-runtime" --no-audit --no-fund @openai/codex > "$EV/codex-runtime-install.log" 2>&1
+          export PATH="$RUNNER_TEMP/codex-qa-runtime/node_modules/.bin:$PATH"
+          codex --version > "$EV/codex-version.txt"
+          bash .agents/skills/codex-qa/scripts/install-verify.sh --self-test > "$EV/codex-install-verify.log" 2>&1
+          bash .agents/skills/codex-qa/scripts/app-server-drive.sh --plugin > "$EV/codex-live.json" 2> "$EV/codex-live.stderr"
+      - name: Verify the shared Native build and real isolated Senpi
+        shell: bash
+        run: |
+          set -euo pipefail
+          cd "$WORK"
+          bun run build:senpi-plugin > "$SENPI_EV/build.log" 2>&1
+          SENPI_BIN="$WORK/node_modules/.bin/senpi" node packages/omo-senpi/scripts/qa/drive.mjs > "$SENPI_EV/live-driver.json" 2> "$SENPI_EV/live-driver.stderr"
+          node --input-type=module -e 'import fs from "node:fs";const r=JSON.parse(fs.readFileSync(process.env.SENPI_EV+"/live-driver.json","utf8"));if(r.result!=="PASS"||r.ultraworkInjected!==true||r.realSenpiUntouched!==true)throw Error(JSON.stringify(r));'
+          sha256sum -c "$EV/source-sha256.txt" > "$EV/final-source-check.log"
+      - name: Capture final evidence manifest
+        if: always()
+        shell: bash
+        run: |
+          if test -n "${EV:-}" && test -d "$EV"; then
+            printf 'Run: %s\nBase: %s\n' "$GITHUB_RUN_ID" "$BASE" > "$EV/run.txt"
+            cd "$WORK/.omo/evidence"
+            find . -type f ! -name SHA256SUMS -print0 | sort -z | xargs -0 sha256sum > SHA256SUMS
+          fi
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omo-9805-full-evidence
+          path: ${{ runner.temp }}/omo-9805-full/.omo/evidence/
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
