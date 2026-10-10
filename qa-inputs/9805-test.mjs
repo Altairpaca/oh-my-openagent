@@ -1,17 +1,17 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import test from "node:test";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 
 const scripts = join(dirname(fileURLToPath(import.meta.url)), "..", "scripts");
 
 // Drive the shipped CLI in a disposable layout. Only external Git results and
 // backoff time are controlled; no test-only export or option is added to it.
 function runCli(t, { failures = 0, strict = true, strictEnv = false, skip = false, pins = "valid" } = {}) {
-	const root = mkdtempSync(join(tmpdir(), "omo-materialize-retry-"));
+	const root = realpathSync(mkdtempSync(join(tmpdir(), "omo-materialize-retry-")));
 	t.after(() => rmSync(root, { recursive: true, force: true }));
 	const entry = join(root, "packages", "omo-codex", "plugin", "scripts");
 	const shared = join(root, "packages", "shared-skills");
@@ -70,7 +70,7 @@ syncBuiltinESMExports();
 	delete env.OMO_MATERIALIZE_STRICT;
 	if (strictEnv) env.OMO_MATERIALIZE_STRICT = "1";
 	if (skip) env.OMO_SKIP_MATERIALIZE = "1";
-	const result = spawnSync(process.execPath, ["--import", preload, join(entry, "materialize-shared-upstreams.mjs"), ...(strict ? ["--strict"] : [])], {
+	const result = spawnSync(process.execPath, ["--import", pathToFileURL(preload).href, join(entry, "materialize-shared-upstreams.mjs"), ...(strict ? ["--strict"] : [])], {
 		cwd: root, env, encoding: "utf8", windowsHide: true, timeout: 10000,
 	});
 	assert.ifError(result.error);
