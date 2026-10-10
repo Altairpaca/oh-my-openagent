@@ -1,0 +1,64 @@
+name: Altair 9805 portable CLI QA
+on:
+  push:
+    branches: [qa/9805-submodule-retry-20261010]
+    paths: [.github/workflows/altair-9805-portable-qa.yml]
+permissions:
+  contents: read
+jobs:
+  portable-cli:
+    if: github.repository == 'Altairpaca/oh-my-openagent'
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, macos-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v7
+        with:
+          node-version: '24'
+      - name: Verify baseline and unchanged candidate with explicit TAP output
+        shell: bash
+        run: |
+          set -euo pipefail
+          base=762839e5551317d04086bb7b4e49b25ad175bd92
+          git fetch --depth=1 origin "$base"
+          work="$RUNNER_TEMP/omo-9805-portable"
+          git worktree add --detach "$work" "$base"
+          ev="$work/.omo/evidence/20261010-9805-portable"
+          mkdir -p "$ev"
+          cd "$work"
+          printf '%s\n' 'Plan: repeat the same eleven shipped-CLI regression tests with an explicit TAP reporter. The earlier wrapper expected TAP but Node 24 selected spec; no test assertions or candidate sources are changed. Capture RED exit1/2pass/9fail, GREEN exit0/11pass/0fail and source hashes.' > "$ev/plan.txt"
+          testfile=packages/omo-codex/plugin/test/materialize-shared-upstreams.test.mjs
+          script=packages/omo-codex/plugin/scripts/materialize-shared-upstreams.mjs
+          cp "$GITHUB_WORKSPACE/qa-inputs/9805-test.mjs" "$testfile"
+          set +e
+          node --test --test-reporter=tap "$testfile" > "$ev/red.log" 2>&1
+          status=$?
+          set -e
+          printf '%s\n' "$status" > "$ev/red.exit"
+          test "$status" -eq 1
+          grep -q '^# pass 2$' "$ev/red.log"
+          grep -q '^# fail 9$' "$ev/red.log"
+          cp "$GITHUB_WORKSPACE/qa-inputs/9805-materializer.mjs" "$script"
+          node --test --test-reporter=tap "$testfile" > "$ev/green.log" 2>&1
+          grep -q '^# pass 11$' "$ev/green.log"
+          grep -q '^# fail 0$' "$ev/green.log"
+          git hash-object "$script" "$testfile" > "$ev/source-blobs.txt"
+          node --version > "$ev/node-version.txt"
+          git diff --check
+          tail -10 "$ev/red.log"
+          tail -10 "$ev/green.log"
+          cat "$ev/source-blobs.txt"
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: omo-9805-cli-tap-${{ matrix.os }}
+          path: ${{ runner.temp }}/omo-9805-portable/.omo/evidence/20261010-9805-portable/
+          retention-days: 7
+          include-hidden-files: true
+          if-no-files-found: error
